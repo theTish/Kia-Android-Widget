@@ -42,10 +42,14 @@ SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError("Missing SECRET_KEY environment variable.")
 
-# Example vehicle details for direct lookup - moved to environment variables
+# Dynamically fetch the first vehicle ID if VEHICLE_ID is not set
 VEHICLE_ID = os.environ.get("VEHICLE_ID")
 if not VEHICLE_ID:
-    raise ValueError("Missing VEHICLE_ID environment variable.")
+    if not vehicle_manager.vehicles:
+        raise ValueError("No vehicles found in the account. Please ensure your Kia account has at least one vehicle.")
+    # Fetch the first vehicle ID
+    VEHICLE_ID = next(iter(vehicle_manager.vehicles.keys()))
+    print(f"No VEHICLE_ID provided. Using the first vehicle found: {VEHICLE_ID}")
 
 # Log incoming requests
 @app.before_request
