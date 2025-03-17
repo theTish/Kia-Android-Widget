@@ -51,7 +51,12 @@ You can create an iOS Shortcut to interact with your Kia Vehicle Control API eas
     3. Tap "Add Action".
     4. In the search bar, type "Get Contents of URL" and select it.
     5. Set the following options for the "Get Contents of URL" action:
-        - URL: Enter the URL of your deployed API endpoint (e.g., https://your-api-url.com/start_climate).
+        - URL: Enter the URL of your deployed API endpoint (e.g., https://your-api-vercel.app/start_climate).
+            - each url will end with the proper endpoint: 
+                    - /unlock_car
+                    - /lock_car
+                    - /start_climate
+                    - /stop_climate
         - Method: Choose POST (or GET if the endpoint requires GET).
         - Headers: Tap "Add New Field" and enter:
             - Key: Authorization
