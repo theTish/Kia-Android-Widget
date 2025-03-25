@@ -199,3 +199,42 @@ def lock_car():
 if __name__ == "__main__":
     print("Starting Kia Vehicle Control API...")
     app.run(host="0.0.0.0", port=8080)
+
+# Battery status endpoint
+@app.route('/battery_status', methods=['GET'])
+def battery_status():
+    print("Received request to /battery_status")
+    auth = request.headers.get("Authorization")
+    print(f"Authorization header received: '{auth}'")
+    
+    if auth != SECRET_KEY:
+        print("Unauthorized request: Missing or incorrect Authorization header")
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        print("Refreshing vehicle states...")
+        vehicle_manager.update_all_vehicles_with_cached_state()
+
+        if not vehicle_manager.vehicles:
+            print("No vehicles found.")
+            return jsonify({"error": "No vehicles found"}), 404
+        
+        # Automatically select the first available vehicle
+        vehicle = next(iter(vehicle_manager.vehicles.values()))
+        print(f"Selected vehicle: {vehicle}")
+
+        # Access battery percentage. Adjust the key name as per your API's response.
+        battery_percentage = vehicle.data.get("battery_percentage")
+        # Alternatively, if it's stored under a different key, for example:
+        # battery_percentage = vehicle.data.get("soc")
+        
+        if battery_percentage is None:
+            print("Battery percentage not found in vehicle data")
+            return jsonify({"error": "Battery percentage not available"}), 500
+
+        print(f"Battery percentage: {battery_percentage}")
+        return jsonify({"status": "Success", "battery_percentage": battery_percentage}), 200
+    except Exception as e:
+        print(f"Error in /battery_status: {e}")
+        return jsonify({"error": str(e)}), 500
+
