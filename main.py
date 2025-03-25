@@ -15,7 +15,7 @@ if USERNAME is None or PASSWORD is None or PIN is None:
 
 # Initialize Vehicle Manager
 vehicle_manager = VehicleManager(
-    region=3,  # North America region
+    region=2,  # North America region
     brand=1,   # KIA brand
     username=USERNAME,
     password=PASSWORD,
