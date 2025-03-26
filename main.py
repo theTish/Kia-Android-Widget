@@ -222,11 +222,13 @@ def battery_status():
         vehicle = next(iter(vehicle_manager.vehicles.values()))
         print(f"Selected vehicle: {vehicle}")
 
-        # 🔍 DEBUG LINE: print all available data from the API
-        import json
-        print(json.dumps(vehicle.data, indent=2))
+        # ✅ Correct key path
+        battery_percentage = (
+            vehicle.data.get("status", {})
+                         .get("evStatus", {})
+                         .get("batteryStatus")
+        )
 
-        battery_percentage = vehicle.data.get("batteryLevel")  # Will likely need to change this
         if battery_percentage is None:
             print("Battery percentage not found in vehicle data")
             return jsonify({"error": "Battery percentage not available"}), 500
