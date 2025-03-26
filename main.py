@@ -200,12 +200,13 @@ if __name__ == "__main__":
     print("Starting Kia Vehicle Control API...")
     app.run(host="0.0.0.0", port=8080)
 
+#Battery Status Endpoint
 @app.route('/battery_status', methods=['GET'])
 def battery_status():
     print("Received request to /battery_status")
     auth = request.headers.get("Authorization")
     print(f"Authorization header received: '{auth}'")
-    
+
     if auth != SECRET_KEY:
         print("Unauthorized request: Missing or incorrect Authorization header")
         return jsonify({"error": "Unauthorized"}), 403
@@ -217,16 +218,15 @@ def battery_status():
         if not vehicle_manager.vehicles:
             print("No vehicles found.")
             return jsonify({"error": "No vehicles found"}), 404
-        
+
         vehicle = next(iter(vehicle_manager.vehicles.values()))
         print(f"Selected vehicle: {vehicle}")
-        
-        # Print the entire vehicle data for debugging
-        print("Full vehicle data:", vehicle.data)
-        
-        # Update this key if necessary based on your debug output.
-        battery_percentage = vehicle.data.get("batteryLevel")  # or use the correct key, e.g. "soc"
-        
+
+        # 🔍 DEBUG LINE: print all available data from the API
+        import json
+        print(json.dumps(vehicle.data, indent=2))
+
+        battery_percentage = vehicle.data.get("batteryLevel")  # Will likely need to change this
         if battery_percentage is None:
             print("Battery percentage not found in vehicle data")
             return jsonify({"error": "Battery percentage not available"}), 500
@@ -236,5 +236,3 @@ def battery_status():
     except Exception as e:
         print(f"Error in /battery_status: {e}")
         return jsonify({"error": str(e)}), 500
-
-
