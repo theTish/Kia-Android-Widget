@@ -224,7 +224,7 @@ def battery_status():
         print(f"Selected vehicle: {vehicle}")
 
         # Access battery percentage. Adjust the key name as per your API's response.
-        battery_percentage = vehicle.data.get("status.battery.batSoc")
+        battery_percentage = vehicle.car_battery_percentage("status.battery.batSoc")
         # Alternatively, if it's stored under a different key, for example:
         # battery_percentage = vehicle.data.get("soc")
         
