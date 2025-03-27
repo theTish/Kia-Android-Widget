@@ -204,37 +204,25 @@ if __name__ == "__main__":
 @app.route('/battery_status', methods=['GET'])
 def battery_status():
     print("Received request to /battery_status")
-    auth = request.headers.get("Authorization")
-    print(f"Authorization header received: '{auth}'")
 
-    if auth != SECRET_KEY:
-        print("Unauthorized request: Missing or incorrect Authorization header")
+    if request.headers.get("Authorization") != SECRET_KEY:
+        print("Unauthorized request")
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        print("Refreshing vehicle states...")
         vehicle_manager.update_all_vehicles_with_cached_state()
-
-        if not vehicle_manager.vehicles:
-            print("No vehicles found.")
-            return jsonify({"error": "No vehicles found"}), 404
-
         vehicle = next(iter(vehicle_manager.vehicles.values()))
-        print(f"Selected vehicle: {vehicle}")
-
-        # ✅ Correct key path
-        battery_percentage = (
-            vehicle.data.get("status", {})
-                         .get("evStatus", {})
-                         .get("batteryStatus")
-        )
+        battery_percentage = vehicle.ev_battery_percentage
+        is_charging = vehicle.ev_battery_is_charging
 
         if battery_percentage is None:
-            print("Battery percentage not found in vehicle data")
-            return jsonify({"error": "Battery percentage not available"}), 500
+            return jsonify({"error": "Battery percentage not available"}), 404
 
-        print(f"Battery percentage: {battery_percentage}")
-        return jsonify({"status": "Success", "battery_percentage": battery_percentage}), 200
+        return jsonify({
+            "battery_percentage": battery_percentage,
+            "is_charging": is_charging
+        })
+
     except Exception as e:
         print(f"Error in /battery_status: {e}")
         return jsonify({"error": str(e)}), 500
