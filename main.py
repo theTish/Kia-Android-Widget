@@ -200,6 +200,27 @@ if __name__ == "__main__":
     print("Starting Kia Vehicle Control API...")
     app.run(host="0.0.0.0", port=8080)
 
+@app.route('/lock_status', methods=['GET'])
+def lock_status():
+    print("Received request to /lock_status")
+
+    if request.headers.get("Authorization") != SECRET_KEY:
+        print("Unauthorized request: Missing or incorrect Authorization header")
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        vehicle_manager.update_all_vehicles_with_cached_state()
+
+        vehicle = next(iter(vehicle_manager.vehicles.values()))
+        is_locked = vehicle.is_locked  # This should be a boolean (True/False)
+
+        print(f"Lock status: {'Locked' if is_locked else 'Unlocked'}")
+        return jsonify({"is_locked": is_locked}), 200
+
+    except Exception as e:
+        print(f"Error in /lock_status: {e}")
+        return jsonify({"error": str(e)}), 500
+
 #Battery Status Endpoint
 @app.route('/battery_status', methods=['GET'])
 def battery_status():
