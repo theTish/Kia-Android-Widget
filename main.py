@@ -130,6 +130,49 @@ def start_climate():
         print(f"Error in /start_climate: {e}")
         return jsonify({"error": str(e)}), 500
 
+# Start Car endpoint
+@app.route('/start_car', methods=['POST'])
+def start_car():
+    print("Received request to /start_car")
+
+    if request.headers.get("Authorization") != SECRET_KEY:
+        print("Unauthorized request: Missing or incorrect Authorization header")
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        print("Refreshing vehicle states...")
+        vehicle_manager.update_all_vehicles_with_cached_state()
+
+        # This starts the full engine/drive system (if supported)
+        result = vehicle_manager.remote_engine_start(VEHICLE_ID)
+        print(f"Remote engine start result: {result}")
+
+        return jsonify({"status": "Vehicle started", "result": result}), 200
+    except Exception as e:
+        print(f"Error in /start_car: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# Stop Car endpoint
+@app.route('/stop_car', methods=['POST'])
+def stop_car():
+    print("Received request to /stop_car")
+
+    if request.headers.get("Authorization") != SECRET_KEY:
+        print("Unauthorized request: Missing or incorrect Authorization header")
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        print("Refreshing vehicle states...")
+        vehicle_manager.update_all_vehicles_with_cached_state()
+
+        result = vehicle_manager.remote_engine_stop(VEHICLE_ID)
+        print(f"Remote engine stop result: {result}")
+
+        return jsonify({"status": "Vehicle stopped", "result": result}), 200
+    except Exception as e:
+        print(f"Error in /stop_car: {e}")
+        return jsonify({"error": str(e)}), 500
+
 # Stop climate endpoint
 @app.route('/stop_climate', methods=['POST'])
 def stop_climate():
