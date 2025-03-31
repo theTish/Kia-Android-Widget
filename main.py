@@ -143,8 +143,11 @@ def start_car():
         print("Refreshing vehicle states...")
         vehicle_manager.update_all_vehicles_with_cached_state()
 
-        # This starts the full engine/drive system (if supported)
-        result = vehicle_manager.remote_engine_start(VEHICLE_ID)
+        # Get the vehicle object
+        vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
+
+        # Call the remote start on the vehicle
+        result = vehicle.remote_engine_start()
         print(f"Remote engine start result: {result}")
 
         return jsonify({"status": "Vehicle started", "result": result}), 200
@@ -165,13 +168,18 @@ def stop_car():
         print("Refreshing vehicle states...")
         vehicle_manager.update_all_vehicles_with_cached_state()
 
-        result = vehicle_manager.remote_engine_stop(VEHICLE_ID)
+        # Get the vehicle object
+        vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
+
+        # Call the remote stop on the vehicle
+        result = vehicle.remote_engine_stop()
         print(f"Remote engine stop result: {result}")
 
         return jsonify({"status": "Vehicle stopped", "result": result}), 200
     except Exception as e:
         print(f"Error in /stop_car: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 # Stop climate endpoint
 @app.route('/stop_climate', methods=['POST'])
