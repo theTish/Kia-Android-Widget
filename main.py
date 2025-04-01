@@ -278,30 +278,3 @@ def lock_status():
     except Exception as e:
         print(f"Error in /lock_status: {e}")
         return jsonify({"error": str(e)}), 500
-
-#Battery Status Endpoint
-@app.route('/battery_status', methods=['GET'])
-def battery_status():
-    print("Received request to /battery_status")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request")
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        vehicle_manager.update_all_vehicles_with_cached_state()
-        vehicle = next(iter(vehicle_manager.vehicles.values()))
-        battery_percentage = vehicle.ev_battery_percentage
-        is_charging = vehicle.ev_battery_is_charging
-
-        if battery_percentage is None:
-            return jsonify({"error": "Battery percentage not available"}), 404
-
-        return jsonify({
-            "battery_percentage": battery_percentage,
-            "is_charging": is_charging
-        })
-
-    except Exception as e:
-        print(f"Error in /battery_status: {e}")
-        return jsonify({"error": str(e)}), 500
