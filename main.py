@@ -113,19 +113,16 @@ def vehicle_status():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        # Refresh cached vehicle data
+        # Refresh vehicle cache
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
-        # Explicitly update status
-        vehicle.update_status()
-        vehicle_status = vehicle.vehicle_status  # full dict
-        ev_status = vehicle.ev_status  # parsed object
+        # Pull full vehicle status dictionary
+        vehicle_status = vehicle.vehicle_status
+        ev_status = vehicle.ev_status
 
-        # Log full response for inspection
         print("Full raw vehicle_status:", vehicle_status)
 
-        # Build response
         response = {
             "battery_percentage": ev_status.battery_percentage,
             "is_charging": ev_status.is_charging,
@@ -134,15 +131,15 @@ def vehicle_status():
             "range_km": ev_status.ev_range
         }
 
-        # Check for 12V battery voltage in raw data
+        # Try extracting 12V battery voltage
         try:
             response["battery_12v"] = (
                 vehicle_status.get("batSoc12v") or
                 vehicle_status.get("battery12Voltage") or
-                vehicle_status.get("battSOC2")  # some APIs return this
+                vehicle_status.get("battSOC2")
             )
-        except Exception as inner_e:
-            print("12V not found:", inner_e)
+        except Exception as e:
+            print("12V battery not found:", e)
 
         return jsonify(response), 200
 
