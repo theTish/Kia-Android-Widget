@@ -104,47 +104,27 @@ def list_vehicles():
         return jsonify({"error": str(e)}), 500
 
 #Vehicle Status Endpoint
-@app.route('/status', methods=['POST'])
-def vehicle_status():
-    print("Received request to /status")
+@app.route('/debug_vehicle', methods=['POST'])
+def debug_vehicle():
+    print("Received request to /debug_vehicle")
 
     if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request")
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        # Refresh vehicle cache
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
-        # Pull full vehicle status dictionary
-        vehicle_status = vehicle.vehicle_status
-        ev_status = vehicle.ev_status
+        # Dump the object to see what it has
+        vehicle_dict = vehicle.__dict__
+        print("Vehicle object keys:", list(vehicle_dict.keys()))
 
-        print("Full raw vehicle_status:", vehicle_status)
-
-        response = {
-            "battery_percentage": ev_status.battery_percentage,
-            "is_charging": ev_status.is_charging,
-            "charging_type": ev_status.charging_type,
-            "plugged_in": ev_status.is_plugged_in,
-            "range_km": ev_status.ev_range
-        }
-
-        # Try extracting 12V battery voltage
-        try:
-            response["battery_12v"] = (
-                vehicle_status.get("batSoc12v") or
-                vehicle_status.get("battery12Voltage") or
-                vehicle_status.get("battSOC2")
-            )
-        except Exception as e:
-            print("12V battery not found:", e)
-
-        return jsonify(response), 200
+        return jsonify({
+            "keys": list(vehicle_dict.keys()),
+            "sample_values": {k: str(vehicle_dict[k])[:100] for k in vehicle_dict if not k.startswith('_')}
+        }), 200
 
     except Exception as e:
-        print(f"Error in /status: {e}")
         return jsonify({"error": str(e)}), 500
 
 # Start climate endpoint
