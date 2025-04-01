@@ -104,9 +104,9 @@ def list_vehicles():
         return jsonify({"error": str(e)}), 500
 
 #Vehicle Status Endpoint
-@app.route('/debug_vehicle', methods=['POST'])
-def debug_vehicle():
-    print("Received request to /debug_vehicle")
+@app.route('/status', methods=['POST'])
+def vehicle_status():
+    print("Received request to /status")
 
     if request.headers.get("Authorization") != SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 403
@@ -115,16 +115,27 @@ def debug_vehicle():
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
-        # Dump the object to see what it has
-        vehicle_dict = vehicle.__dict__
-        print("Vehicle object keys:", list(vehicle_dict.keys()))
+        response = {
+            "battery_percentage": int(vehicle.ev_battery_percentage),
+            "battery_12v": int(vehicle.car_battery_percentage),
+            "is_charging": bool(vehicle.ev_battery_is_charging),
+            "plugged_in": bool(int(vehicle.ev_battery_is_plugged_in)),
+            "is_locked": bool(vehicle.is_locked),
+            "engine_running": bool(vehicle.engine_is_running),
+            "doors": {
+                "front_left": bool(int(vehicle.front_left_door_is_open)),
+                "front_right": bool(int(vehicle.front_right_door_is_open)),
+                "back_left": bool(int(vehicle.back_left_door_is_open)),
+                "back_right": bool(int(vehicle.back_right_door_is_open)),
+                "trunk": bool(vehicle.trunk_is_open),
+                "hood": bool(vehicle.hood_is_open)
+            }
+        }
 
-        return jsonify({
-            "keys": list(vehicle_dict.keys()),
-            "sample_values": {k: str(vehicle_dict[k])[:100] for k in vehicle_dict if not k.startswith('_')}
-        }), 200
+        return jsonify(response), 200
 
     except Exception as e:
+        print(f"Error in /status: {e}")
         return jsonify({"error": str(e)}), 500
 
 # Start climate endpoint
