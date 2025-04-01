@@ -61,44 +61,6 @@ def log_request_info():
 def root():
     return jsonify({"status": "Welcome to the Kia Vehicle Control API"}), 200
 
-#Vehicle Status Endpoint
-@app.route('/status', methods=['POST'])
-def vehicle_status():
-    print("Received request to /status")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request")
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        vehicle_manager.update_all_vehicles_with_cached_state()
-        vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
-        status = vehicle.get_status()
-
-        # Print full raw response to inspect for 12V battery key
-        print("Full vehicle status response:", status)
-
-        response = {
-            "battery_percentage": status.ev_status.battery_percentage,
-            "is_charging": status.ev_status.is_charging,
-            "charging_type": status.ev_status.charging_type,
-            "plugged_in": status.ev_status.is_plugged_in,
-            "range_km": status.ev_status.ev_range
-        }
-
-        # Try extracting 12V battery voltage if available
-        try:
-            response["battery_12v"] = status.raw["vehicleStatus"].get("battery12Voltage") or \
-                                       status.raw["vehicleStatus"].get("batSoc12v")
-        except Exception as e:
-            print("No 12V battery info found:", e)
-
-        return jsonify(response), 200
-
-    except Exception as e:
-        print(f"Error in /status: {e}")
-        return jsonify({"error": str(e)}), 500
-
 # List vehicles endpoint
 @app.route('/list_vehicles', methods=['GET'])
 def list_vehicles():
@@ -139,6 +101,36 @@ def list_vehicles():
     except Exception as e:
         print(f"Error in /list_vehicles: {e}")
         return jsonify({"error": str(e)}), 500
+
+#Vehicle Status Endpoint
+@app.route('/status', methods=['POST'])
+def vehicle_status():
+    print("Received request to /status")
+
+    if request.headers.get("Authorization") != SECRET_KEY:
+        print("Unauthorized request")
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        vehicle_manager.update_all_vehicles_with_cached_state()
+        vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
+        status = vehicle.status
+
+        print("Full vehicle status response:", status.raw)  # for debugging
+
+        response = {
+            "battery_percentage": status.ev_status.battery_percentage,
+            "is_charging": status.ev_status.is_charging,
+            "charging_type": status.ev_status.charging_type,
+            "plugged_in": status.ev_status.is_plugged_in,
+            "range_km": status.ev_status.ev_range
+        }
+
+        # Optional: Try to extract 12V battery if it's there
+        try:
+            response["battery_12v"] = status.raw["vehicleStatus"].get("batSoc12v") or \
+                                       status.raw["vehicleStatus"].get("battery12Voltage")
+        except Exception as e
 
 # Start climate endpoint
 @app.route('/start_climate', methods=['POST'])
