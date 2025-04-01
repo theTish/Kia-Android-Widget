@@ -130,7 +130,7 @@ def vehicle_status():
         try:
             response["battery_12v"] = status.raw["vehicleStatus"].get("batSoc12v") or \
                                        status.raw["vehicleStatus"].get("battery12Voltage")
-        except Exception as e
+        except Exception as e:
 
 # Start climate endpoint
 @app.route('/start_climate', methods=['POST'])
