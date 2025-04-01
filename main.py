@@ -113,31 +113,36 @@ def vehicle_status():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        # Update cached data and get vehicle
+        # Refresh cached vehicle data
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
-        status = vehicle.status
 
-        # Log full raw response so we can inspect it
-        print("Full status.raw dump:", status.raw)
+        # Explicitly update status
+        vehicle.update_status()
+        vehicle_status = vehicle.vehicle_status  # full dict
+        ev_status = vehicle.ev_status  # parsed object
 
-        # Basic EV info
+        # Log full response for inspection
+        print("Full raw vehicle_status:", vehicle_status)
+
+        # Build response
         response = {
-            "battery_percentage": status.ev_status.battery_percentage,
-            "is_charging": status.ev_status.is_charging,
-            "charging_type": status.ev_status.charging_type,
-            "plugged_in": status.ev_status.is_plugged_in,
-            "range_km": status.ev_status.ev_range
+            "battery_percentage": ev_status.battery_percentage,
+            "is_charging": ev_status.is_charging,
+            "charging_type": ev_status.charging_type,
+            "plugged_in": ev_status.is_plugged_in,
+            "range_km": ev_status.ev_range
         }
 
-        # Optional: 12V battery voltage if available
+        # Check for 12V battery voltage in raw data
         try:
             response["battery_12v"] = (
-                status.raw["vehicleStatus"].get("batSoc12v") or
-                status.raw["vehicleStatus"].get("battery12Voltage")
+                vehicle_status.get("batSoc12v") or
+                vehicle_status.get("battery12Voltage") or
+                vehicle_status.get("battSOC2")  # some APIs return this
             )
         except Exception as inner_e:
-            print("No 12V battery info available:", inner_e)
+            print("12V not found:", inner_e)
 
         return jsonify(response), 200
 
