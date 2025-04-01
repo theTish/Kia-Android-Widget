@@ -103,6 +103,48 @@ def list_vehicles():
         print(f"Error in /list_vehicles: {e}")
         return jsonify({"error": str(e)}), 500
 
+#Vehicle Status Endpoint
+@app.route('/status', methods=['POST'])
+def vehicle_status():
+    print("Received request to /status")
+
+    if request.headers.get("Authorization") != SECRET_KEY:
+        print("Unauthorized request")
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        # Update cached data and get vehicle
+        vehicle_manager.update_all_vehicles_with_cached_state()
+        vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
+        status = vehicle.status
+
+        # Log full raw response so we can inspect it
+        print("Full status.raw dump:", status.raw)
+
+        # Basic EV info
+        response = {
+            "battery_percentage": status.ev_status.battery_percentage,
+            "is_charging": status.ev_status.is_charging,
+            "charging_type": status.ev_status.charging_type,
+            "plugged_in": status.ev_status.is_plugged_in,
+            "range_km": status.ev_status.ev_range
+        }
+
+        # Optional: 12V battery voltage if available
+        try:
+            response["battery_12v"] = (
+                status.raw["vehicleStatus"].get("batSoc12v") or
+                status.raw["vehicleStatus"].get("battery12Voltage")
+            )
+        except Exception as inner_e:
+            print("No 12V battery info available:", inner_e)
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        print(f"Error in /status: {e}")
+        return jsonify({"error": str(e)}), 500
+
 # Start climate endpoint
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
