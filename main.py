@@ -144,14 +144,24 @@ def start_climate():
     print("🔧 Received request to /start_climate")
 
     try:
+        # Update all cached vehicle state
         vehicle_manager.update_all_vehicles_with_cached_state()
-        vehicle = vehicle_manager.get_vehicle()
 
-        print("✅ Vehicle retrieved, sending climate start command...")
+        # Get the vehicle ID from the list
+        vehicle_ids = list(vehicle_manager.vehicles.keys())
+        if not vehicle_ids:
+            raise Exception("No vehicles found.")
+        vehicle_id = vehicle_ids[0]
 
+        # Get the actual vehicle object
+        vehicle = vehicle_manager.get_vehicle(vehicle_id)
+
+        print(f"🚗 Starting climate for vehicle ID: {vehicle_id}")
+
+        # Start climate with default values
         result = vehicle.start_climate(
-            set_temp=22,            # Celsius only (mapped internally to Fahrenheit)
-            duration=10,            # in minutes
+            set_temp=22,            # Celsius
+            duration=10,            # minutes
             defrost=True,
             heating=True,
             steering_wheel=True
