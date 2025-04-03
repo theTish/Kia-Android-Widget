@@ -262,3 +262,40 @@ def lock_status():
     except Exception as e:
         print(f"Error in /lock_status: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/debug_vehicle', methods=['GET'])
+def debug_vehicle():
+    print("🐞 Debugging vehicle object")
+
+    if request.headers.get("Authorization") != SECRET_KEY:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        vehicle_manager.update_all_vehicles_with_cached_state()
+        vehicle = vehicle_manager.vehicles[0]
+
+        # Try all dump options
+        try:
+            print("🚨 repr(vehicle):")
+            print(repr(vehicle))
+        except Exception as e:
+            print("repr() failed:", e)
+
+        try:
+            print("🚨 dir(vehicle):")
+            print(dir(vehicle))
+        except Exception as e:
+            print("dir() failed:", e)
+
+        try:
+            print("🚨 vehicle.__dict__:")
+            print(vehicle.__dict__)
+        except Exception as e:
+            print("__dict__ failed:", e)
+
+        return jsonify({"status": "Vehicle debug complete ✅"}), 200
+
+    except Exception as e:
+        print(f"❌ Debug Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
