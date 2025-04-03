@@ -149,7 +149,16 @@ def start_climate():
 
     try:
         vehicle_manager.update_all_vehicles_with_cached_state()
-        result = vehicle_manager.start_climate(VEHICLE_ID)  # no options passed
+
+        # Define the options inline (if ClimateRequestOptions isn't importable)
+        options = {
+            "set_temp": 22,       # Celsius (adjust as needed)
+            "duration": 10,       # Duration in minutes
+            "defrost": True,
+            "air_ctrl": True
+        }
+
+        result = vehicle_manager.start_climate(VEHICLE_ID, options)
         print("Start climate result:", result)
 
         return jsonify({"status": "Climate started", "result": str(result)}), 200
