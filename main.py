@@ -175,11 +175,11 @@ class ClimateRequestOptions:
             "steering_wheel": steering_wheel
         }
 
+# Start climate endpoint
+@app.route('/start_climate', methods=['POST'])
 print("DEBUG: Allowed temperatures from vehicle object:")
 print(vehicle_manager.vehicles[0].TEMPERATURES_F)
 
-# Start climate endpoint
-@app.route('/start_climate', methods=['POST'])
 def start_climate():
     print("Received request to /start_climate")
 
