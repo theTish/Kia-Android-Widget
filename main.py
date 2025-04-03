@@ -265,37 +265,44 @@ def lock_status():
 
 @app.route('/debug_vehicle', methods=['GET'])
 def debug_vehicle():
-    print("🐞 Debugging vehicle object")
+    print("🐞 Starting /debug_vehicle")
 
     if request.headers.get("Authorization") != SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        vehicle_manager.update_all_vehicles_with_cached_state()
-        vehicle = vehicle_manager.vehicles[0]
+        print("🔑 Starting vehicle manager debug")
 
-        # Try all dump options
         try:
-            print("🚨 repr(vehicle):")
-            print(repr(vehicle))
+            print("📡 Updating vehicle state...")
+            updated = vehicle_manager.update_all_vehicles_with_cached_state()
+            print("✅ update_all_vehicles_with_cached_state returned:", updated)
         except Exception as e:
-            print("repr() failed:", e)
+            print("❌ Failed in update_all_vehicles_with_cached_state:", e)
+            return jsonify({"error": "Vehicle update failed", "detail": str(e)}), 500
 
         try:
-            print("🚨 dir(vehicle):")
+            print("🚗 Getting vehicle from manager...")
+            vehicle = vehicle_manager.vehicles[0]
+            print("✅ Got vehicle:", vehicle)
+        except Exception as e:
+            print("❌ Failed to get vehicle:", e)
+            return jsonify({"error": "Vehicle access failed", "detail": str(e)}), 500
+
+        try:
+            print("📦 Dumping dir(vehicle):")
             print(dir(vehicle))
         except Exception as e:
-            print("dir() failed:", e)
+            print("❌ dir() failed:", e)
 
         try:
-            print("🚨 vehicle.__dict__:")
+            print("📦 Dumping __dict__:")
             print(vehicle.__dict__)
         except Exception as e:
-            print("__dict__ failed:", e)
+            print("❌ __dict__ failed:", e)
 
-        return jsonify({"status": "Vehicle debug complete ✅"}), 200
+        return jsonify({"status": "Vehicle debug completed ✅"}), 200
 
     except Exception as e:
-        print(f"❌ Debug Error: {e}")
+        print(f"❌ General failure in /debug_vehicle: {e}")
         return jsonify({"error": str(e)}), 500
-
