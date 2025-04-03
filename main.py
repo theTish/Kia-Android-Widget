@@ -140,19 +140,41 @@ def vehicle_status():
 
 # Inline class for ClimateRequestOptions
 class ClimateRequestOptions:
-    def __init__(self, set_temp=None, duration=10, defrost=False, heating=False):
+    def __init__(
+        self,
+        set_temp=None,
+        duration=10,
+        defrost=False,
+        heating=False,
+        front_left_seat=None,
+        front_right_seat=None,
+        rear_left_seat=None,
+        rear_right_seat=None,
+        steering_wheel=None
+    ):
         self.set_temp = set_temp
         self.duration = duration
         self.defrost = defrost
         self.heating = heating
+        self.front_left_seat = front_left_seat
+        self.front_right_seat = front_right_seat
+        self.rear_left_seat = rear_left_seat
+        self.rear_right_seat = rear_right_seat
+        self.steering_wheel = steering_wheel
 
-        # ALSO provide a `.climate` dict in case the method accesses it
+        # Optional: also provide a `.climate` dict in case it's used
         self.climate = {
             "set_temp": set_temp,
             "duration": duration,
             "defrost": defrost,
-            "heating": heating
+            "heating": heating,
+            "front_left_seat": front_left_seat,
+            "front_right_seat": front_right_seat,
+            "rear_left_seat": rear_left_seat,
+            "rear_right_seat": rear_right_seat,
+            "steering_wheel": steering_wheel
         }
+
 
 # Start climate endpoint
 @app.route('/start_climate', methods=['POST'])
@@ -165,11 +187,18 @@ def start_climate():
     try:
         vehicle_manager.update_all_vehicles_with_cached_state()
 
-        climate_options = ClimateRequestOptions(
-            set_temp=22,
-            duration=10,
-            defrost=True,
-            heating=True
+       climate_options = ClimateRequestOptions(
+           set_temp=22,
+           duration=10,
+           defrost=True,
+           heating=True,
+           front_left_seat="HEAT",
+           front_right_seat="HEAT",
+           rear_left_seat="OFF",
+           rear_right_seat="OFF",
+           steering_wheel="HEAT"
+       )
+
         )
 
         print("Sending climate options:", climate_options.climate)
