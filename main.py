@@ -141,6 +141,12 @@ def vehicle_status():
 # Inline class for ClimateRequestOptions
 class ClimateRequestOptions:
     def __init__(self, set_temp=None, duration=10, defrost=False, heating=False):
+        self.set_temp = set_temp
+        self.duration = duration
+        self.defrost = defrost
+        self.heating = heating
+
+        # ALSO provide a `.climate` dict in case the method accesses it
         self.climate = {
             "set_temp": set_temp,
             "duration": duration,
