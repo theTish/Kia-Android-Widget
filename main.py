@@ -162,33 +162,21 @@ def start_climate():
 
         vehicle = vehicle_manager.vehicles[0]
 
-        # 🧩 Dump everything on the vehicle object
-        print("🚨 Full vehicle object dump:")
+        # Force visible dumps
         try:
-            for attr in dir(vehicle):
-                if not attr.startswith("_"):
-                    try:
-                        val = getattr(vehicle, attr)
-                        print(f"{attr}: {val}")
-                    except Exception as inner_e:
-                        print(f"{attr}: <Error: {inner_e}>")
+            print("🚨 Raw vehicle object repr():")
+            print(repr(vehicle))
         except Exception as e:
-            print(f"Failed to dump vehicle object: {e}")
+            print("repr() failed:", e)
 
-        # 🚫 Try a known test value — likely to fail but allows logging
-        climate_options = ClimateRequestOptions(
-            set_temp=72,
-            duration=10
-        )
+        try:
+            print("🚨 vehicle.__dict__ dump:")
+            print(vehicle.__dict__)
+        except Exception as e:
+            print("vehicle.__dict__ failed:", e)
 
-        print("📤 Sending options:", vars(climate_options))
-        result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
-        print("✅ API Result:", result)
-
-        return jsonify({
-            "status": "Climate request sent",
-            "result": str(result)
-        }), 200
+        # Skip actual climate command for now
+        return jsonify({"status": "Vehicle inspected ✅"}), 200
 
     except Exception as e:
         print(f"❌ Error in /start_climate: {e}")
