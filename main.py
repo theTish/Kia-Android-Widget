@@ -138,7 +138,13 @@ def vehicle_status():
         print(f"Error in /status: {e}")
         return jsonify({"error": str(e)}), 500
 
-print("Climate options about to be sent:", vars(climate_options))
+# Inline class for ClimateRequestOptions
+class ClimateRequestOptions:
+    def __init__(self, set_temp=None, duration=10, defrost=False, heating=False):
+        self.set_temp = set_temp
+        self.duration = duration
+        self.defrost = defrost
+        self.heating = heating
 
 # Start climate endpoint
 @app.route('/start_climate', methods=['POST'])
@@ -146,24 +152,24 @@ def start_climate():
     print("Received request to /start_climate")
 
     if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request to /start_climate")
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        print("Refreshing vehicle state...")
+        print("Updating vehicle state...")
         vehicle_manager.update_all_vehicles_with_cached_state()
-   
+
         climate_options = ClimateRequestOptions(
-            set_temp=20,
+            set_temp=22,
             duration=10,
-            defrost=False,
-            heating=True,
+            defrost=True,
+            heating=False  # Keep it False for now to avoid unsupported features
         )
 
-        print("Starting climate with options:", vars(climate_options))
-        result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
-        print("Start climate result:", result)
+        print("Climate options about to be sent:", vars(climate_options))
 
+        result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
+
+        print("Start climate result:", result)
         return jsonify({
             "status": "Climate started",
             "result": str(result)
@@ -172,9 +178,6 @@ def start_climate():
     except Exception as e:
         print(f"Error in /start_climate: {e}")
         return jsonify({"error": str(e)}), 500
-
-result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
-print("Raw result from API:", result)
 
 # Stop climate endpoint
 @app.route('/stop_climate', methods=['POST'])
