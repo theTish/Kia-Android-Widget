@@ -139,34 +139,46 @@ def vehicle_status():
         return jsonify({"error": str(e)}), 500
 
 # Start climate endpoint
-from hyundai_kia_connect_api.options.climate import ClimateRequestOptions
+# Define ClimateRequestOptions inline since we aren't using the full external library
+class ClimateRequestOptions:
+    def __init__(self, set_temp=None, duration=10, defrost=False, air_ctrl=False, heating=False):
+        self.set_temp = set_temp
+        self.duration = duration
+        self.defrost = defrost
+        self.air_ctrl = air_ctrl
+        self.heating = heating
 
+
+# Start climate endpoint
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
     print("Received request to /start_climate")
 
-    # Authorization check
     if request.headers.get("Authorization") != SECRET_KEY:
+        print("Unauthorized request to /start_climate")
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        # Update vehicle state
+        print("Refreshing vehicle state...")
         vehicle_manager.update_all_vehicles_with_cached_state()
 
-        # Define climate options
+        # Create and configure your climate options
         climate_options = ClimateRequestOptions(
-            set_temp=22,     # Target temperature in Celsius
-            duration=10,     # Duration in minutes
-            defrost=True,    # Enable defrost
-            air_ctrl=True,   # Activate air control
-            heating=1        # Enable heating (1 for on, 0 for off)
+            set_temp=20,      # Celsius — adjust as needed
+            duration=10,      # Minutes — can be increased up to your vehicle limit
+            defrost=False,     # Turns on defrost
+            air_ctrl=True,    # Activates HVAC
+            heating=False      # Enables seat/wheel heating if supported
         )
 
-        # Start climate control
+        print("Starting climate with options:", vars(climate_options))
         result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
         print("Start climate result:", result)
 
-        return jsonify({"status": "Climate started", "result": str(result)}), 200
+        return jsonify({
+            "status": "Climate started",
+            "result": str(result)
+        }), 200
 
     except Exception as e:
         print(f"Error in /start_climate: {e}")
