@@ -144,43 +144,28 @@ def start_climate():
     print("Received request to /start_climate")
 
     if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request: Missing or incorrect Authorization header")
+        print("Unauthorized request")
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        print("Refreshing vehicle states...")
+        # Update vehicle state before sending command
         vehicle_manager.update_all_vehicles_with_cached_state()
 
+        # Only use supported arguments
         from hyundai_kia_connect_api.options.climate import ClimateRequestOptions
-import inspect
 
-try:
-    import inspect
-    print(inspect.signature(ClimateRequestOptions.__init__))
-
-    vehicle_manager.update_all_vehicles_with_cached_state()
-    # ... rest of logic
-
-except Exception as e:
-    print(f"Error in /start_climate: {e}")
-    return jsonify({"error": str(e)}), 500
-
-
-        # Create full-featured ClimateRequestOptions
         climate_options = ClimateRequestOptions(
-            set_temp=68,                 # Target temp in Fahrenheit
-            duration=10,                 # Duration in minutes
-            defrost=True,               # Enable front windshield defrost
-            climate=True,               # Enable main HVAC system
-            heating1=True,              # Driver seat heater
-            heating2=True,              # Passenger seat heater
-            steeringwheel_heater=True   # Turn on heated steering wheel
+            set_temp=22,         # temperature in Celsius
+            duration=10,         # in minutes
+            defrost=True,
+            air_ctrl=True        # turn on climate control
         )
 
         result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
         print(f"Start climate result: {result}")
 
-        return jsonify({"status": "Climate started with enhanced settings", "result": result}), 200
+        return jsonify({"status": "Climate started", "result": str(result)}), 200
+
     except Exception as e:
         print(f"Error in /start_climate: {e}")
         return jsonify({"error": str(e)}), 500
