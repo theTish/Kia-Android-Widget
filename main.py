@@ -145,21 +145,25 @@ from hyundai_kia_connect_api.options.climate import ClimateRequestOptions
 def start_climate():
     print("Received request to /start_climate")
 
+    # Authorization check
     if request.headers.get("Authorization") != SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
+        # Update vehicle state
         vehicle_manager.update_all_vehicles_with_cached_state()
 
-        options = ClimateRequestOptions(
-            set_temp=22,       # Celsius (adjust for your climate preference)
-            duration=10,       # Minutes
-            defrost=True,
-            air_ctrl=True,
-            heating=True       # Optional: steering + seat heat if supported
+        # Define climate options
+        climate_options = ClimateRequestOptions(
+            set_temp=22,     # Target temperature in Celsius
+            duration=10,     # Duration in minutes
+            defrost=True,    # Enable defrost
+            air_ctrl=True,   # Activate air control
+            heating=1        # Enable heating (1 for on, 0 for off)
         )
 
-        result = vehicle_manager.start_climate(VEHICLE_ID, options)
+        # Start climate control
+        result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
         print("Start climate result:", result)
 
         return jsonify({"status": "Climate started", "result": str(result)}), 200
