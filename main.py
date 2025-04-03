@@ -148,21 +148,9 @@ def start_climate():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        # Update vehicle state before sending command
         vehicle_manager.update_all_vehicles_with_cached_state()
-
-        # Only use supported arguments
-        from hyundai_kia_connect_api.options.climate import ClimateRequestOptions
-
-        climate_options = ClimateRequestOptions(
-            set_temp=22,         # temperature in Celsius
-            duration=10,         # in minutes
-            defrost=True,
-            air_ctrl=True        # turn on climate control
-        )
-
-        result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
-        print(f"Start climate result: {result}")
+        result = vehicle_manager.start_climate(VEHICLE_ID)  # no options passed
+        print("Start climate result:", result)
 
         return jsonify({"status": "Climate started", "result": str(result)}), 200
 
