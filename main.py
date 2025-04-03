@@ -141,10 +141,12 @@ def vehicle_status():
 # Inline class for ClimateRequestOptions
 class ClimateRequestOptions:
     def __init__(self, set_temp=None, duration=10, defrost=False, heating=False):
-        self.set_temp = set_temp
-        self.duration = duration
-        self.defrost = defrost
-        self.heating = heating
+        self.climate = {
+            "set_temp": set_temp,
+            "duration": duration,
+            "defrost": defrost,
+            "heating": heating
+        }
 
 # Start climate endpoint
 @app.route('/start_climate', methods=['POST'])
@@ -155,17 +157,16 @@ def start_climate():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        print("Updating vehicle state...")
         vehicle_manager.update_all_vehicles_with_cached_state()
 
         climate_options = ClimateRequestOptions(
             set_temp=22,
             duration=10,
             defrost=True,
-            heating=False  # Keep it False for now to avoid unsupported features
+            heating=True
         )
 
-        print("Climate options about to be sent:", vars(climate_options))
+        print("Sending climate options:", climate_options.climate)
 
         result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
 
