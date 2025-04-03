@@ -273,7 +273,7 @@ def debug_vehicle():
     try:
         print("🔑 Starting vehicle manager debug")
 
-        # Try refreshing vehicle state
+        # Step 1: Refresh state
         try:
             print("📡 Updating vehicle state...")
             updated = vehicle_manager.update_all_vehicles_with_cached_state()
@@ -282,33 +282,34 @@ def debug_vehicle():
             print("❌ Failed in update_all_vehicles_with_cached_state:", e)
             return jsonify({"error": "Vehicle update failed", "detail": str(e)}), 500
 
-        # Show vehicle list length
+        # Step 2: Access vehicle from dict
         try:
             vehicles = vehicle_manager.vehicles
             print("🚘 Vehicle list:", vehicles)
             print("🚘 Number of vehicles:", len(vehicles))
 
-            if len(vehicles) == 0:
+            if not vehicles:
                 return jsonify({"error": "No vehicles found. Please check credentials or token."}), 500
 
-            vehicle = vehicles[0]
+            # ✅ Fix: grab first Vehicle object from dict values
+            vehicle = list(vehicles.values())[0]
             print("✅ Got vehicle:", vehicle)
         except Exception as e:
             print("❌ Failed to get vehicle:", e)
             return jsonify({"error": "Vehicle access failed", "detail": str(e)}), 500
 
-        # Dump object structure
+        # Step 3: Dump structure
         try:
             print("📦 Dumping dir(vehicle):")
             print(dir(vehicle))
         except Exception as e:
-            print("❌ dir() failed:", e)
+            print("❌ dir(vehicle) failed:", e)
 
         try:
             print("📦 Dumping vehicle.__dict__:")
             print(vehicle.__dict__)
         except Exception as e:
-            print("❌ __dict__ failed:", e)
+            print("❌ vehicle.__dict__ failed:", e)
 
         return jsonify({"status": "Vehicle debug completed ✅"}), 200
 
