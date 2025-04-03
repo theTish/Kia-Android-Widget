@@ -154,8 +154,17 @@ def start_climate():
         from hyundai_kia_connect_api.options.climate import ClimateRequestOptions
 import inspect
 
-print("ClimateRequestOptions accepted parameters:")
-print(inspect.signature(ClimateRequestOptions.__init__))
+try:
+    import inspect
+    print(inspect.signature(ClimateRequestOptions.__init__))
+
+    vehicle_manager.update_all_vehicles_with_cached_state()
+    # ... rest of logic
+
+except Exception as e:
+    print(f"Error in /start_climate: {e}")
+    return jsonify({"error": str(e)}), 500
+
 
         # Create full-featured ClimateRequestOptions
         climate_options = ClimateRequestOptions(
