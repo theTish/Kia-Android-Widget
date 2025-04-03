@@ -139,24 +139,25 @@ def vehicle_status():
         return jsonify({"error": str(e)}), 500
 
 # Start climate endpoint
+from hyundai_kia_connect_api.options.climate import ClimateRequestOptions
+
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
     print("Received request to /start_climate")
 
     if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request")
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
         vehicle_manager.update_all_vehicles_with_cached_state()
 
-        # Define the options inline (if ClimateRequestOptions isn't importable)
-        options = {
-            "set_temp": 22,       # Celsius (adjust as needed)
-            "duration": 10,       # Duration in minutes
-            "defrost": True,
-            "air_ctrl": True
-        }
+        options = ClimateRequestOptions(
+            set_temp=22,       # Celsius (adjust for your climate preference)
+            duration=10,       # Minutes
+            defrost=True,
+            air_ctrl=True,
+            heating=True       # Optional: steering + seat heat if supported
+        )
 
         result = vehicle_manager.start_climate(VEHICLE_ID, options)
         print("Start climate result:", result)
