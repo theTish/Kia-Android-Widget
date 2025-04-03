@@ -263,12 +263,55 @@ def lock_status():
         print(f"Error in /lock_status: {e}")
         return jsonify({"error": str(e)}), 500
 
-try:
-    print("🚘 Vehicle list:", vehicle_manager.vehicles)
-    print("🚘 Number of vehicles:", len(vehicle_manager.vehicles))
+@app.route('/debug_vehicle', methods=['GET'])
+def debug_vehicle():
+    print("🐞 Starting /debug_vehicle")
 
-    if len(vehicle_manager.vehicles) == 0:
-        return jsonify({"error": "No vehicles found after update."}), 500
+    if request.headers.get("Authorization") != SECRET_KEY:
+        return jsonify({"error": "Unauthorized"}), 403
 
-    vehicle = vehicle_manager.vehicles[0]
-    print("✅ Got vehicle:", vehicle)
+    try:
+        print("🔑 Starting vehicle manager debug")
+
+        # Try refreshing vehicle state
+        try:
+            print("📡 Updating vehicle state...")
+            updated = vehicle_manager.update_all_vehicles_with_cached_state()
+            print("✅ update_all_vehicles_with_cached_state returned:", updated)
+        except Exception as e:
+            print("❌ Failed in update_all_vehicles_with_cached_state:", e)
+            return jsonify({"error": "Vehicle update failed", "detail": str(e)}), 500
+
+        # Show vehicle list length
+        try:
+            vehicles = vehicle_manager.vehicles
+            print("🚘 Vehicle list:", vehicles)
+            print("🚘 Number of vehicles:", len(vehicles))
+
+            if len(vehicles) == 0:
+                return jsonify({"error": "No vehicles found. Please check credentials or token."}), 500
+
+            vehicle = vehicles[0]
+            print("✅ Got vehicle:", vehicle)
+        except Exception as e:
+            print("❌ Failed to get vehicle:", e)
+            return jsonify({"error": "Vehicle access failed", "detail": str(e)}), 500
+
+        # Dump object structure
+        try:
+            print("📦 Dumping dir(vehicle):")
+            print(dir(vehicle))
+        except Exception as e:
+            print("❌ dir() failed:", e)
+
+        try:
+            print("📦 Dumping vehicle.__dict__:")
+            print(vehicle.__dict__)
+        except Exception as e:
+            print("❌ __dict__ failed:", e)
+
+        return jsonify({"status": "Vehicle debug completed ✅"}), 200
+
+    except Exception as e:
+        print(f"❌ General failure in /debug_vehicle: {e}")
+        return jsonify({"error": str(e)}), 500
