@@ -187,8 +187,10 @@ def start_climate():
     try:
         vehicle_manager.update_all_vehicles_with_cached_state()
 
+        print("Allowed temps:", vehicle_manager.allowed_temperatures)
+        
         climate_options = ClimateRequestOptions(
-            set_temp=68,
+            set_temp=70,
             duration=10,
             defrost=True,
             heating=True,
