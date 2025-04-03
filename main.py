@@ -138,86 +138,56 @@ def vehicle_status():
         print(f"Error in /status: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Inline class for ClimateRequestOptions
+# Define a safe, minimal ClimateRequestOptions class
 class ClimateRequestOptions:
-    def __init__(
-        self,
-        set_temp=None,
-        duration=10,
-        defrost=False,
-        heating=False,
-        front_left_seat=None,
-        front_right_seat=None,
-        rear_left_seat=None,
-        rear_right_seat=None,
-        steering_wheel=None
-    ):
+    def __init__(self, set_temp=None, duration=10):
         self.set_temp = set_temp
         self.duration = duration
-        self.defrost = defrost
-        self.heating = heating
-        self.front_left_seat = front_left_seat
-        self.front_right_seat = front_right_seat
-        self.rear_left_seat = rear_left_seat
-        self.rear_right_seat = rear_right_seat
-        self.steering_wheel = steering_wheel
 
-        # Optional: also provide a `.climate` dict in case it's used
+        # Also provide optional .climate dict for compatibility
         self.climate = {
             "set_temp": set_temp,
-            "duration": duration,
-            "defrost": defrost,
-            "heating": heating,
-            "front_left_seat": front_left_seat,
-            "front_right_seat": front_right_seat,
-            "rear_left_seat": rear_left_seat,
-            "rear_right_seat": rear_right_seat,
-            "steering_wheel": steering_wheel
+            "duration": duration
         }
 
-# Start climate endpoint
+# Flask route
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
-    print("Received request to /start_climate")
+    print("🔧 Received request to /start_climate")
 
     if request.headers.get("Authorization") != SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        print("Updating vehicle state...")
+        print("🔄 Updating vehicle state...")
         vehicle_manager.update_all_vehicles_with_cached_state()
+
         vehicle = vehicle_manager.vehicles[0]
 
-        # 🔍 Try printing allowed temperature values (if available)
+        # 🔍 Optional: print allowed temp list if available
         temps = getattr(vehicle, 'TEMPERATURES_F', None)
         if temps:
-            print("Allowed set_temp values:", temps)
+            print("✅ Allowed set_temp values:", temps)
 
-        # ✅ Pick one known to be safe (adjust after printing list)
+        # ✅ Basic climate options — safe test config
         climate_options = ClimateRequestOptions(
-            set_temp=72,  # You will update this once the allowed list prints
-            duration=10,
-            defrost=True,
-            heating=True,
-            front_left_seat="HEAT",
-            front_right_seat="HEAT",
-            rear_left_seat="OFF",
-            rear_right_seat="OFF",
-            steering_wheel="HEAT"
+            set_temp=72,  # ❗ Swap this after logging allowed values
+            duration=10
         )
 
-        print("Sending climate options:", vars(climate_options))
+        print("📤 Sending options to start_climate():", vars(climate_options))
 
         result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
-        print("Start climate result:", result)
+
+        print("✅ API Response:", result)
 
         return jsonify({
-            "status": "Climate started",
+            "status": "Climate request sent",
             "result": str(result)
         }), 200
 
     except Exception as e:
-        print(f"Error in /start_climate: {e}")
+        print(f"❌ Error in /start_climate: {e}")
         return jsonify({"error": str(e)}), 500
         
 # Stop climate endpoint
