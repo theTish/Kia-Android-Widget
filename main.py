@@ -138,7 +138,7 @@ def vehicle_status():
         print(f"Error in /status: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Minimal ClimateRequestOptions
+# Minimal ClimateRequestOptions class
 class ClimateRequestOptions:
     def __init__(self, set_temp=None, duration=10):
         self.set_temp = set_temp
@@ -148,7 +148,7 @@ class ClimateRequestOptions:
             "duration": duration
         }
 
-# Route
+# Flask route
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
     print("🔧 Received request to /start_climate")
@@ -159,24 +159,23 @@ def start_climate():
     try:
         print("🔄 Updating vehicle state...")
         vehicle_manager.update_all_vehicles_with_cached_state()
+
         vehicle = vehicle_manager.vehicles[0]
 
-        # 🔍 Debug temp ranges
+        # 🧩 Dump everything on the vehicle object
+        print("🚨 Full vehicle object dump:")
         try:
-            print("🚨 Checking vehicle attribute: TEMPERATURES_F")
-            temps_f = getattr(vehicle, 'TEMPERATURES_F', None)
-            print("TEMPERATURES_F:", temps_f)
-        except Exception as temp_error:
-            print("Could not read TEMPERATURES_F:", temp_error)
+            for attr in dir(vehicle):
+                if not attr.startswith("_"):
+                    try:
+                        val = getattr(vehicle, attr)
+                        print(f"{attr}: {val}")
+                    except Exception as inner_e:
+                        print(f"{attr}: <Error: {inner_e}>")
+        except Exception as e:
+            print(f"Failed to dump vehicle object: {e}")
 
-        try:
-            print("🚨 Checking vehicle attribute: TEMPERATURES_C")
-            temps_c = getattr(vehicle, 'TEMPERATURES_C', None)
-            print("TEMPERATURES_C:", temps_c)
-        except Exception as temp_error:
-            print("Could not read TEMPERATURES_C:", temp_error)
-
-        # 🌡 Set a known test value (will fix after seeing logs)
+        # 🚫 Try a known test value — likely to fail but allows logging
         climate_options = ClimateRequestOptions(
             set_temp=72,
             duration=10
