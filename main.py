@@ -139,33 +139,34 @@ def vehicle_status():
         return jsonify({"error": str(e)}), 500
 
 # Start Climate Endpoint
+from hyundai_kia_connect_api.KiaUvoApiCommon.climate_options import ClimateRequestOptions
+
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
     print("🔧 Received request to /start_climate")
 
     try:
-        # Update all cached vehicle state
         vehicle_manager.update_all_vehicles_with_cached_state()
 
-        # Get the vehicle ID from the list
         vehicle_ids = list(vehicle_manager.vehicles.keys())
         if not vehicle_ids:
             raise Exception("No vehicles found.")
         vehicle_id = vehicle_ids[0]
 
-        # Get the actual vehicle object
         vehicle = vehicle_manager.get_vehicle(vehicle_id)
-
         print(f"🚗 Starting climate for vehicle ID: {vehicle_id}")
 
-        # Start climate with default values
-        result = vehicle.start_climate(
-            set_temp=22,            # Celsius
-            duration=10,            # minutes
+        # Build the ClimateRequestOptions object
+        climate_options = ClimateRequestOptions(
+            set_temp=22,
+            duration=10,
             defrost=True,
             heating=True,
             steering_wheel=True
         )
+
+        # Trigger climate start
+        result = vehicle.climate.start(climate_options)
 
         return jsonify({
             "status": "climate_started",
