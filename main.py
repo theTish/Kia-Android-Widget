@@ -138,19 +138,17 @@ def vehicle_status():
         print(f"Error in /status: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Define a safe, minimal ClimateRequestOptions class
+# Minimal ClimateRequestOptions
 class ClimateRequestOptions:
     def __init__(self, set_temp=None, duration=10):
         self.set_temp = set_temp
         self.duration = duration
-
-        # Also provide optional .climate dict for compatibility
         self.climate = {
             "set_temp": set_temp,
             "duration": duration
         }
 
-# Flask route
+# Route
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
     print("🔧 Received request to /start_climate")
@@ -161,25 +159,32 @@ def start_climate():
     try:
         print("🔄 Updating vehicle state...")
         vehicle_manager.update_all_vehicles_with_cached_state()
-
         vehicle = vehicle_manager.vehicles[0]
 
-        # 🔍 Optional: print allowed temp list if available
-        temps = getattr(vehicle, 'TEMPERATURES_F', None)
-        if temps:
-            print("✅ Allowed set_temp values:", temps)
+        # 🔍 Debug temp ranges
+        try:
+            print("🚨 Checking vehicle attribute: TEMPERATURES_F")
+            temps_f = getattr(vehicle, 'TEMPERATURES_F', None)
+            print("TEMPERATURES_F:", temps_f)
+        except Exception as temp_error:
+            print("Could not read TEMPERATURES_F:", temp_error)
 
-        # ✅ Basic climate options — safe test config
+        try:
+            print("🚨 Checking vehicle attribute: TEMPERATURES_C")
+            temps_c = getattr(vehicle, 'TEMPERATURES_C', None)
+            print("TEMPERATURES_C:", temps_c)
+        except Exception as temp_error:
+            print("Could not read TEMPERATURES_C:", temp_error)
+
+        # 🌡 Set a known test value (will fix after seeing logs)
         climate_options = ClimateRequestOptions(
-            set_temp=72,  # ❗ Swap this after logging allowed values
+            set_temp=72,
             duration=10
         )
 
-        print("📤 Sending options to start_climate():", vars(climate_options))
-
+        print("📤 Sending options:", vars(climate_options))
         result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
-
-        print("✅ API Response:", result)
+        print("✅ API Result:", result)
 
         return jsonify({
             "status": "Climate request sent",
