@@ -138,6 +138,8 @@ def vehicle_status():
         print(f"Error in /status: {e}")
         return jsonify({"error": str(e)}), 500
 
+print("Climate options about to be sent:", vars(climate_options))
+
 # Start climate endpoint
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
@@ -156,9 +158,6 @@ def start_climate():
             duration=10,
             defrost=False,
             heating=True,
-            front_left_seat="HEAT",
-            front_right_seat="OFF",
-            steering_wheel="OFF"
         )
 
         print("Starting climate with options:", vars(climate_options))
@@ -173,6 +172,9 @@ def start_climate():
     except Exception as e:
         print(f"Error in /start_climate: {e}")
         return jsonify({"error": str(e)}), 500
+
+result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
+print("Raw result from API:", result)
 
 # Stop climate endpoint
 @app.route('/stop_climate', methods=['POST'])
