@@ -138,7 +138,9 @@ def vehicle_status():
         print(f"Error in /status: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Flask route
+# Start Climate Endpoint
+from hyundai_kia_connect_api.options.climate import ClimateRequestOptions
+
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
     print("🔧 Received request to /start_climate")
@@ -150,26 +152,26 @@ def start_climate():
         print("🔄 Updating vehicle state...")
         vehicle_manager.update_all_vehicles_with_cached_state()
 
-        vehicle = vehicle_manager.vehicles[0]
+        vehicle = list(vehicle_manager.vehicles.values())[0]
 
-        # Force visible dumps
-        try:
-            print("🚨 Raw vehicle object repr():")
-            print(repr(vehicle))
-        except Exception as e:
-            print("repr() failed:", e)
+        # Set up climate options
+        climate_options = ClimateRequestOptions(
+            set_temp=22,               # Celsius
+            duration=10,               # Minutes
+            defrost=True,
+            heating=True,
+            steering_wheel=True
+        )
 
-        try:
-            print("🚨 vehicle.__dict__ dump:")
-            print(vehicle.__dict__)
-        except Exception as e:
-            print("vehicle.__dict__ failed:", e)
+        print("🚀 Starting climate with options:", vars(climate_options))
 
-        # Skip actual climate command for now
-        return jsonify({"status": "Vehicle inspected ✅"}), 200
+        result = vehicle.start_climate(climate_options)
+        print("✅ Climate started:", result)
+
+        return jsonify({"status": "Climate started", "result": result}), 200
 
     except Exception as e:
-        print(f"❌ Error in /start_climate: {e}")
+        print("❌ Error in /start_climate:", e)
         return jsonify({"error": str(e)}), 500
         
 # Stop climate endpoint
@@ -261,58 +263,4 @@ def lock_status():
 
     except Exception as e:
         print(f"Error in /lock_status: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/debug_vehicle', methods=['GET'])
-def debug_vehicle():
-    print("🐞 Starting /debug_vehicle")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        print("🔑 Starting vehicle manager debug")
-
-        # Step 1: Refresh state
-        try:
-            print("📡 Updating vehicle state...")
-            updated = vehicle_manager.update_all_vehicles_with_cached_state()
-            print("✅ update_all_vehicles_with_cached_state returned:", updated)
-        except Exception as e:
-            print("❌ Failed in update_all_vehicles_with_cached_state:", e)
-            return jsonify({"error": "Vehicle update failed", "detail": str(e)}), 500
-
-        # Step 2: Access vehicle from dict
-        try:
-            vehicles = vehicle_manager.vehicles
-            print("🚘 Vehicle list:", vehicles)
-            print("🚘 Number of vehicles:", len(vehicles))
-
-            if not vehicles:
-                return jsonify({"error": "No vehicles found. Please check credentials or token."}), 500
-
-            # ✅ Fix: grab first Vehicle object from dict values
-            vehicle = list(vehicles.values())[0]
-            print("✅ Got vehicle:", vehicle)
-        except Exception as e:
-            print("❌ Failed to get vehicle:", e)
-            return jsonify({"error": "Vehicle access failed", "detail": str(e)}), 500
-
-        # Step 3: Dump structure
-        try:
-            print("📦 Dumping dir(vehicle):")
-            print(dir(vehicle))
-        except Exception as e:
-            print("❌ dir(vehicle) failed:", e)
-
-        try:
-            print("📦 Dumping vehicle.__dict__:")
-            print(vehicle.__dict__)
-        except Exception as e:
-            print("❌ vehicle.__dict__ failed:", e)
-
-        return jsonify({"status": "Vehicle debug completed ✅"}), 200
-
-    except Exception as e:
-        print(f"❌ General failure in /debug_vehicle: {e}")
         return jsonify({"error": str(e)}), 500
