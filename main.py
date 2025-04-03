@@ -139,15 +139,16 @@ def vehicle_status():
         return jsonify({"error": str(e)}), 500
 
 # Start climate endpoint
-# Define ClimateRequestOptions inline since we aren't using the full external library
+# Inline ClimateRequestOptions class to match the expected structure
 class ClimateRequestOptions:
     def __init__(self, set_temp=None, duration=10, defrost=False, air_ctrl=False, heating=False):
-        self.set_temp = set_temp
-        self.duration = duration
-        self.defrost = defrost
-        self.air_ctrl = air_ctrl
-        self.heating = heating
-
+        self.climate = {
+            "set_temp": set_temp,
+            "duration": duration,
+            "defrost": defrost,
+            "air_ctrl": air_ctrl,
+            "heating": heating
+        }
 
 # Start climate endpoint
 @app.route('/start_climate', methods=['POST'])
@@ -162,16 +163,16 @@ def start_climate():
         print("Refreshing vehicle state...")
         vehicle_manager.update_all_vehicles_with_cached_state()
 
-        # Create and configure your climate options
+        # Create climate options object with expected structure
         climate_options = ClimateRequestOptions(
-            set_temp=20,      # Celsius — adjust as needed
-            duration=10,      # Minutes — can be increased up to your vehicle limit
-            defrost=False,     # Turns on defrost
-            air_ctrl=True,    # Activates HVAC
-            heating=False      # Enables seat/wheel heating if supported
+            set_temp=22,      # Celsius (adjust to your preference)
+            duration=10,      # Minutes (e.g., 5, 10, 15)
+            defrost=True,     # Enable defrost
+            air_ctrl=True,    # Turn on HVAC
+            heating=True      # Enable heated seats/wheel if available
         )
 
-        print("Starting climate with options:", vars(climate_options))
+        print("Starting climate with options:", climate_options.climate)
         result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
         print("Start climate result:", result)
 
