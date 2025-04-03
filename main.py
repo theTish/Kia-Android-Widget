@@ -177,9 +177,6 @@ class ClimateRequestOptions:
 
 # Start climate endpoint
 @app.route('/start_climate', methods=['POST'])
-print("DEBUG: Allowed temperatures from vehicle object:")
-print(vehicle_manager.vehicles[0].TEMPERATURES_F)
-
 def start_climate():
     print("Received request to /start_climate")
 
@@ -187,10 +184,18 @@ def start_climate():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
+        print("Updating vehicle state...")
         vehicle_manager.update_all_vehicles_with_cached_state()
-    
+        vehicle = vehicle_manager.vehicles[0]
+
+        # 🔍 Try printing allowed temperature values (if available)
+        temps = getattr(vehicle, 'TEMPERATURES_F', None)
+        if temps:
+            print("Allowed set_temp values:", temps)
+
+        # ✅ Pick one known to be safe (adjust after printing list)
         climate_options = ClimateRequestOptions(
-            set_temp=72,
+            set_temp=72,  # You will update this once the allowed list prints
             duration=10,
             defrost=True,
             heating=True,
@@ -202,6 +207,7 @@ def start_climate():
         )
 
         print("Sending climate options:", vars(climate_options))
+
         result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
         print("Start climate result:", result)
 
@@ -213,7 +219,7 @@ def start_climate():
     except Exception as e:
         print(f"Error in /start_climate: {e}")
         return jsonify({"error": str(e)}), 500
-
+        
 # Stop climate endpoint
 @app.route('/stop_climate', methods=['POST'])
 def stop_climate():
