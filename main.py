@@ -151,11 +151,13 @@ def start_climate():
         print("Refreshing vehicle state...")
         vehicle_manager.update_all_vehicles_with_cached_state()
 
+        print("DEBUG: ClimateRequestOptions args:")
+        print(dir(ClimateRequestOptions))
+        
         climate_options = ClimateRequestOptions(
             set_temp=22,
             duration=10,
             defrost=True,
-            air_ctrl=True,
             heating=True
         )
 
