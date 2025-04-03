@@ -138,16 +138,6 @@ def vehicle_status():
         print(f"Error in /status: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Minimal ClimateRequestOptions class
-class ClimateRequestOptions:
-    def __init__(self, set_temp=None, duration=10):
-        self.set_temp = set_temp
-        self.duration = duration
-        self.climate = {
-            "set_temp": set_temp,
-            "duration": duration
-        }
-
 # Flask route
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
