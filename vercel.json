@@ -1,9 +1,14 @@
 {
   "functions": {
     "api/*.py": {
-      "runtime": "vercel-python@3.9"
+      "runtime": "vercel-python@0.5.0"
     }
   },
-  "buildCommand": "pip install --upgrade pip && pip install -r requirements.txt",
-  "outputDirectory": "."
+  "buildCommand": "pip install -r requirements.txt",
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/api/main.py"
+    }
+  ]
 }
