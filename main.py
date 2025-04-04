@@ -145,7 +145,7 @@ def start_climate():
         payload = request.get_json(force=True)
 
         vehicle = vehicle_manager.vehicles[0]
-        vehicle_id = vehicle.id
+        vehicle = vehicle_manager.get_vehicle(vehicle_id)
 
         options = ClimateRequestOptions(
             climate=payload.get("climate", True),
