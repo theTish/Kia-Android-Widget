@@ -1,8 +1,10 @@
 
-import os
 from flask import Flask, request, jsonify
-from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
+import os
+from hyundai_kia_connect_api import VehicleManager
+from hyundai_kia_connect_api.models.climate_request_options import ClimateRequestOptions
 from hyundai_kia_connect_api.exceptions import AuthenticationError
+from requests.exceptions import JSONDecodeError
 
 app = Flask(__name__)
 
@@ -139,54 +141,49 @@ def vehicle_status():
         return jsonify({"error": str(e)}), 500
 
 # Start Climate Endpoint
-from flask import request, jsonify
-from hyundai_kia_connect_api import ClimateRequestOptions
-
-@app.route('/start_climate', methods=['POST'])
+@app.route("/start_climate", methods=["POST"])
 def start_climate():
-    print("🔧 Received request to /start_climate")
-
     try:
-        data = request.get_json(force=True)
-        print(f"📦 Incoming payload: {data}")
-    except Exception as e:
-        return jsonify({"error": f"Invalid JSON payload: {str(e)}"}), 400
+        payload = request.get_json(force=True)
+        print("📦 Incoming payload:", payload)
 
-    try:
-        # Pull vehicle ID from cache or default to first
-        vehicle_id = list(vehicle_manager.vehicles.keys())[0]
-        vehicle = vehicle_manager.get_vehicle(vehicle_id)
-        print(f"🚗 Found vehicle: {vehicle.name} ({vehicle.id})")
-    except Exception as e:
-        return jsonify({"error": f"Failed to get vehicle: {str(e)}"}), 500
+        # Update vehicle state to get the latest
+        vehicle_manager.update_all_vehicles_with_cached_state()
+        vehicles = vehicle_manager.get_cached_vehicles()
 
-    try:
-        # Build ClimateRequestOptions from payload or default values
+        if not vehicles:
+            return jsonify({"error": "No vehicle found"}), 400
+
+        vehicle_id, vehicle = list(vehicles.items())[0]
+        print(f"🚗 Found vehicle: {vehicle.name} ({vehicle_id})")
+
+        # Build climate options
         options = ClimateRequestOptions(
-            set_temp=int(data.get("set_temp", 22)),     # Default 22°C
-            duration=int(data.get("duration", 10)),     # 10 min
-            defrost=data.get("defrost", True),
-            climate=data.get("climate", True),
-            heating=data.get("heating", True),
-            front_left_seat=data.get("front_left_seat"),
-            front_right_seat=data.get("front_right_seat"),
-            rear_left_seat=data.get("rear_left_seat"),
-            rear_right_seat=data.get("rear_right_seat"),
-            steering_wheel=data.get("steering_wheel")
+            set_temp=payload.get("set_temp", 22),
+            duration=payload.get("duration", 10),
+            defrost=payload.get("defrost", True),
+            climate=payload.get("climate", True),
+            heating=payload.get("heating", True),
+            front_left_seat=payload.get("front_left_seat"),
+            front_right_seat=payload.get("front_right_seat"),
+            rear_left_seat=payload.get("rear_left_seat"),
+            rear_right_seat=payload.get("rear_right_seat"),
+            steering_wheel=payload.get("steering_wheel")
         )
-        print(f"🔥 Sending climate options: {options}")
-    except Exception as e:
-        return jsonify({"error": f"Failed to build options: {str(e)}"}), 400
 
-    try:
+        print("🔥 Sending climate options:", options)
+
+        # Start climate
         result = vehicle_manager.start_climate(vehicle_id, options)
-        print(f"✅ Climate start response: {result}")
-        return jsonify({"success": True, "response": result})
+        return jsonify({"success": True, "result": result})
+
+    except JSONDecodeError:
+        return jsonify({"error": "Invalid JSON returned from Kia API"}), 502
+    except AuthenticationError as e:
+        return jsonify({"error": f"Auth failed: {str(e)}"}), 401
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-      
+        print("❌ Error in /start_climate:", e)
+        return jsonify({"error": str(e)}), 500      
 # Stop climate endpoint
 @app.route('/stop_climate', methods=['POST'])
 def stop_climate():
