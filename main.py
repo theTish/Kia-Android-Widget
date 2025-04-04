@@ -140,7 +140,7 @@ def vehicle_status():
 
 # Start Climate Endpoint
 from flask import request, jsonify
-from hyundai_kia_connect_api.models.climate_request_options import ClimateRequestOptions
+from hyundai_kia_connect_api import ClimateRequestOptions
 
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
