@@ -139,12 +139,6 @@ def vehicle_status():
         return jsonify({"error": str(e)}), 500
 
 # Start Climate Endpoint
-from flask import Flask, request, jsonify
-from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
-from hyundai_kia_connect_api.exceptions import AuthenticationError
-
-app = Flask(__name__)
-
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
     try:
