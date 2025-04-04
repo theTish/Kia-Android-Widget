@@ -171,7 +171,7 @@ def start_climate():
 
         # Create ClimateRequestOptions object
         climate_options = ClimateRequestOptions(
-            set_temp=72,  # Set temperature in Fahrenheit
+            set_temp=20,  # Set temperature in Fahrenheit
             duration=10   # Duration in minutes
         )
 
