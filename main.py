@@ -141,31 +141,35 @@ def vehicle_status():
 # Start Climate Endpoint
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
+    print("🔧 Received request to /start_climate")
+
     try:
-        print("🔧 Received request to /start_climate")
-        
+        from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
+
         vehicle_manager = VehicleManager()
+        print("🔑 Authenticating and refreshing state...")
         vehicle_manager.update_all_vehicles_with_cached_state()
 
         vehicles = vehicle_manager.get_cached_vehicles()
+        print(f"🚘 Vehicle list: {vehicles}")
         vehicle_id = list(vehicles.keys())[0]
-        print("🚗 Starting climate for vehicle ID:", vehicle_id)
+        print("✅ Using vehicle ID:", vehicle_id)
 
-        vehicle = vehicle_manager.get_vehicle(vehicle_id)
-
-        climate_options = ClimateRequestOptions(
-            set_temp=22,
-            duration=10,
+        # Set desired climate options
+        options = ClimateRequestOptions(
+            set_temp=22,     # Celsius
+            duration=10,     # Minutes
             defrost=True
         )
+        print("🧊 Climate options:", options)
 
-        result = vehicle_manager.start_climate(vehicle_id, climate_options)
-        print("✅ Climate start result:", result)
+        result = vehicle_manager.start_climate(vehicle_id, options)
+        print("✅ Climate start success:", result)
 
-        return jsonify({"status": "success", "result": result})
+        return jsonify({"status": "climate_started", "result": result})
 
     except Exception as e:
-        print("❌ Error in /start_climate:", str(e))
+        print("❌ Exception during /start_climate:", str(e))
         return jsonify({"error": str(e)}), 500
         
 # Stop climate endpoint
