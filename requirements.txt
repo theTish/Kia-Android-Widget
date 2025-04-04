@@ -1,3 +1,4 @@
 Flask==2.2.2
 requests==2.31.0
-git+https://github.com/theTish/bluelinky-py.git@main#egg=hyundai_kia_connect_api
+git+https://TheTish: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@github.com/theTish/bluelinky-py.git@main#egg=bluelinky-py
+
