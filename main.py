@@ -142,42 +142,29 @@ def vehicle_status():
 @app.route("/start_climate", methods=["POST"])
 def start_climate():
     try:
-        print("🔧 Received request to /start_climate")
-        data = request.get_json(force=True)
-        print(f"📦 Incoming payload: {data}")
+        payload = request.get_json(force=True)
 
-        # Auth and refresh tokens
-        vehicle_manager.login()
-        token = vehicle_manager.token
-
-        # Get the first vehicle object
         vehicle = vehicle_manager.vehicles[0]
-        print(f"🚗 Found vehicle: {vehicle.name} ({vehicle.id})")
+        vehicle_id = vehicle.id
 
-        # Set up climate options
-        options = ClimateRequestOptions()
+        options = ClimateRequestOptions(
+            climate=payload.get("climate", True),
+            set_temp=payload.get("set_temp", 21),
+            defrost=payload.get("defrost", False),
+            heating=payload.get("heating", 1),
+            duration=payload.get("duration", 10),
+            front_left_seat=payload.get("front_left_seat", 0),
+            front_right_seat=payload.get("front_right_seat", 0),
+            rear_left_seat=payload.get("rear_left_seat", 0),
+            rear_right_seat=payload.get("rear_right_seat", 0),
+            steering_wheel=payload.get("steering_wheel", 0)
+        )
 
-        # Apply user-defined settings from the JSON payload
-        options.set_temp = data.get("set_temp", 21)
-        options.duration = data.get("duration", 5)
-        options.defrost = data.get("defrost", False)
-        options.climate = data.get("climate", True)
-        options.heating = data.get("heating", 0)
-        options.front_left_seat = data.get("front_left_seat")
-        options.front_right_seat = data.get("front_right_seat")
-        options.rear_left_seat = data.get("rear_left_seat")
-        options.rear_right_seat = data.get("rear_right_seat")
-        options.steering_wheel = data.get("steering_wheel")
+        transaction_id = vehicle_manager.start_climate(vehicle_id, options)
 
-        print(f"🔥 Sending climate options: {options}")
-
-        result = vehicle_manager.start_climate(token, vehicle, options)
-        print("✅ Climate start result:", result)
-
-        return jsonify({"status": "success", "transactionId": result})
+        return jsonify({"status": "success", "transaction_id": transaction_id}), 200
 
     except Exception as e:
-        print("❌ Error in /start_climate:", str(e))
         return jsonify({"error": str(e)}), 500
 
 # Stop climate endpoint
