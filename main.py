@@ -139,52 +139,53 @@ def vehicle_status():
         return jsonify({"error": str(e)}), 500
 
 #Start Car Endpoint
-@app.route('/start_car', methods=['POST'])
-def start_car():
-    print("Received request to /start_car")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        vehicle_manager.update_all_vehicles_with_cached_state()
-        result = vehicle_manager.start_engine(VEHICLE_ID)  # if available
-        print("Start car result:", result)
-
-        return jsonify({"status": "Car started", "result": str(result)}), 200
-    except Exception as e:
-        print(f"Error in /start_car: {e}")
-        return jsonify({"error": str(e)}), 500
-
-# Start climate endpoint
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
-    print("Received request to /start_climate")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request: Missing or incorrect Authorization header")
-        return jsonify({"error": "Unauthorized"}), 403
-
     try:
-        print("Refreshing vehicle states...")
-        vehicle_manager.update_all_vehicles_with_cached_state()
+        print("🔧 Received request to /start_climate")
 
-        # Create ClimateRequestOptions object
-        climate_options = ClimateRequestOptions(
-            set_temp=20,
-            defrost=False,
-            front_left_seat=3,
-            duration=10
+        data = request.get_json()
+        print(f"📦 Incoming payload: {data}")
+
+        # Extract dynamic values with sensible defaults
+        set_temp = data.get("set_temp", 21)
+        duration = data.get("duration", 5)
+        defrost = data.get("defrost", False)
+        climate = data.get("climate", True)
+        heating = data.get("heating", 0)
+        front_left_seat = data.get("front_left_seat")
+        front_right_seat = data.get("front_right_seat")
+        rear_left_seat = data.get("rear_left_seat")
+        rear_right_seat = data.get("rear_right_seat")
+
+        # Grab the first vehicle from the authenticated VehicleManager
+        vehicle = vehicle_manager.get_vehicle()
+        print(f"🚗 Found vehicle: {vehicle.name} ({vehicle.id})")
+
+        # Create options object
+        options = ClimateRequestOptions(
+            set_temp=set_temp,
+            duration=duration,
+            defrost=defrost,
+            climate=climate,
+            heating=heating,
+            front_left_seat=front_left_seat,
+            front_right_seat=front_right_seat,
+            rear_left_seat=rear_left_seat,
+            rear_right_seat=rear_right_seat
         )
 
-        # Start climate control using the VehicleManager's start_climate method
-        result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
-        print(f"Start climate result: {result}")
+        print(f"🔥 Sending climate options: {options}")
 
-        return jsonify({"status": "Climate started", "result": result}), 200
+        result = vehicle_manager.start_climate(vehicle.id, options)
+        print(f"✅ Climate start result: {result}")
+
+        return jsonify({"success": True, "transactionId": result})
+
     except Exception as e:
-        print(f"Error in /start_climate: {e}")
+        print(f"❌ Error in /start_climate: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 # Stop climate endpoint
 @app.route('/stop_climate', methods=['POST'])
