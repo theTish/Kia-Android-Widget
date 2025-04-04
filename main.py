@@ -173,9 +173,7 @@ def start_climate():
         climate_options = ClimateRequestOptions(
             set_temp=20,
             defrost=False,
-            heating1=True,
-            heating2=False,
-            steeringwheel_heater=True,
+            steeringwheel_heater=False,
             duration=10
         )
 
