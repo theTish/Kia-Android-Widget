@@ -278,3 +278,26 @@ def lock_status():
     except Exception as e:
         print(f"Error in /lock_status: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/debug_vehicle', methods=['POST'])
+def debug_vehicle():
+    print("Received request to /debug_vehicle")
+
+    if request.headers.get("Authorization") != SECRET_KEY:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        vehicle_manager.update_all_vehicles_with_cached_state()
+        vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
+
+        # Dump the object to see what it has
+        vehicle_dict = vehicle.__dict__
+        print("Vehicle object keys:", list(vehicle_dict.keys()))
+
+        return jsonify({
+            "keys": list(vehicle_dict.keys()),
+            "sample_values": {k: str(vehicle_dict[k])[:100] for k in vehicle_dict if not k.startswith('_')}
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
