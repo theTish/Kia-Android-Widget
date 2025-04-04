@@ -173,7 +173,7 @@ def start_climate():
         climate_options = ClimateRequestOptions(
             set_temp=20,
             defrost=False,
-            front_left_seat=3,
+            front_left_seat=0,
             duration=10
         )
 
