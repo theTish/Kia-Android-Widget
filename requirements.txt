@@ -1,3 +1,3 @@
-Flask
-requests
+Flask==2.2.2
+requests==2.31.0
 git+https://github.com/Hacksore/bluelinky-py.git@main#egg=hyundai_kia_connect_api
