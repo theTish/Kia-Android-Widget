@@ -169,21 +169,17 @@ def start_climate():
         print("Refreshing vehicle states...")
         vehicle_manager.update_all_vehicles_with_cached_state()
 
-        # Create full-featured ClimateRequestOptions
+        # Create ClimateRequestOptions object
         climate_options = ClimateRequestOptions(
-            set_temp=68,                 # Target temp in Fahrenheit
-            duration=10,                 # Duration in minutes
-            defrost=True,               # Enable front windshield defrost
-            climate=True,               # Enable main HVAC system
-            heating1=True,              # Driver seat heater
-            heating2=True,              # Passenger seat heater
-            steeringwheel_heater=True   # Turn on heated steering wheel
+            set_temp=72,  # Set temperature in Fahrenheit
+            duration=10   # Duration in minutes
         )
 
+        # Start climate control using the VehicleManager's start_climate method
         result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
         print(f"Start climate result: {result}")
 
-        return jsonify({"status": "Climate started with enhanced settings", "result": result}), 200
+        return jsonify({"status": "Climate started", "result": result}), 200
     except Exception as e:
         print(f"Error in /start_climate: {e}")
         return jsonify({"error": str(e)}), 500
