@@ -141,9 +141,20 @@ def vehicle_status():
 # Start Climate Endpoint
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
+    print("🔧 Received request to /start_climate")
+
     try:
+        # Refresh token and vehicle state
+        print("🔄 Refreshing token and updating vehicle state...")
         vehicle_manager.check_and_refresh_token()
-        vehicle = next(iter(vehicle_manager.vehicles.values()))
+        vehicle_manager.update_all_vehicles_with_cached_state()
+
+        # Get the first vehicle
+        vehicle_id = next(iter(vehicle_manager.vehicles))
+        vehicle = vehicle_manager.get_vehicle(vehicle_id)
+        print(f"🚗 Found vehicle: {vehicle.name} ({vehicle.id})")
+
+        # Set desired climate options
         options = ClimateRequestOptions(
             set_temp=22,
             duration=10,
@@ -151,12 +162,19 @@ def start_climate():
             climate=True,
             heating=True
         )
-        vehicle_manager.start_climate(vehicle.id, options)
+        print(f"🔥 Sending climate options: {options}")
+
+        # Send command to start climate
+        vehicle_manager.start_climate(vehicle_id, options)
+        print("✅ Climate started successfully.")
+
         return jsonify({"success": True})
 
     except AuthenticationError as auth_err:
+        print(f"❌ Auth error: {auth_err}")
         return jsonify({"error": f"Authentication failed: {auth_err}"}), 401
     except Exception as e:
+        print(f"❌ Error in /start_climate: {e}")
         return jsonify({"error": str(e)}), 500
         
 # Stop climate endpoint
