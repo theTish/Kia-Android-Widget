@@ -140,53 +140,38 @@ def vehicle_status():
 
 # Start Climate Endpoint
 from flask import Flask, request, jsonify
-from hyundai_kia_connect_api import VehicleManager
-from hyundai_kia_connect_api import ClimateRequestOptions
-import os
+from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
+from hyundai_kia_connect_api.exceptions import AuthenticationError
 
 app = Flask(__name__)
 
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
-    print("🔧 Received request to /start_climate")
-
     try:
-        # Check auth
-        auth_header = request.headers.get("Authorization")
-        if auth_header != os.environ.get("SECRET_KEY"):
-            return jsonify({"error": "Unauthorized"}), 401
+        print("🔧 Received request to /start_climate")
+        
+        vehicle_manager = VehicleManager()
+        vehicle_manager.update_all_vehicles_with_cached_state()
 
-        # Create vehicle manager
-        username = os.environ.get("KIA_USER")
-        password = os.environ.get("KIA_PASS")
-        pin = os.environ.get("KIA_PIN")
-        region = os.environ.get("KIA_REGION", "CA")
+        vehicles = vehicle_manager.get_cached_vehicles()
+        vehicle_id = list(vehicles.keys())[0]
+        print("🚗 Starting climate for vehicle ID:", vehicle_id)
 
-        manager = VehicleManager(username, password, pin, region=region)
-        print("🔑 Created VehicleManager")
+        vehicle = vehicle_manager.get_vehicle(vehicle_id)
 
-        manager.update_all_vehicles_with_cached_state()
-        vehicle_id = manager.get_all_vehicles()[0].id
-        vehicle = manager.get_vehicle(vehicle_id)
-        print(f"🚗 Starting climate for vehicle ID: {vehicle_id}")
-
-        # Create climate options
         climate_options = ClimateRequestOptions(
-            set_temp=22,       # Celsius
-            duration=10,       # Minutes
-            defrost=True,
-            heating=True
+            set_temp=22,
+            duration=10,
+            defrost=True
         )
 
-        print(f"🌡 ClimateRequestOptions: {climate_options}")
+        result = vehicle_manager.start_climate(vehicle_id, climate_options)
+        print("✅ Climate start result:", result)
 
-        result = vehicle.climate.start(climate_options)
-        print(f"✅ Climate start result: {result}")
-
-        return jsonify({"start_climate": True, "result": str(result)})
+        return jsonify({"status": "success", "result": result})
 
     except Exception as e:
-        print(f"❌ Error in /start_climate: {e}")
+        print("❌ Error in /start_climate:", str(e))
         return jsonify({"error": str(e)}), 500
         
 # Stop climate endpoint
