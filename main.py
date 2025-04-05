@@ -142,6 +142,8 @@ def vehicle_status():
 @app.route('/start_car', methods=['POST'])
 def start_car():
     print("Received request to /start_car")
+    data = request.get_json(force=True)
+    print(f"📦 Incoming payload: {data}")
 
     if request.headers.get("Authorization") != SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 403
