@@ -138,7 +138,7 @@ def vehicle_status():
         print(f"Error in /status: {e}")
         return jsonify({"error": str(e)}), 500
 
-#Start Climate Endpoint
+#Start Car Endpoint
 @app.route('/start_car', methods=['POST'])
 def start_car():
     print("Received request to /start_car")
@@ -171,10 +171,16 @@ def start_climate():
 
         # Create ClimateRequestOptions object
         climate_options = ClimateRequestOptions(
-            set_temp=20,
-            defrost=False,
-            front_left_seat=0,
-            duration=10
+            climate=payload.get("climate", True),
+            set_temp=payload.get("set_temp", 21),
+            defrost=payload.get("defrost", False),
+            heating=payload.get("heating", 1),
+            duration=payload.get("duration", 10),
+            front_left_seat=payload.get("front_left_seat", 0),
+            front_right_seat=payload.get("front_right_seat", 0),
+            rear_left_seat=payload.get("rear_left_seat", 0),
+            rear_right_seat=payload.get("rear_right_seat", 0),
+            steering_wheel=payload.get("steering_wheel", 0)
         )
 
         # Start climate control using the VehicleManager's start_climate method
