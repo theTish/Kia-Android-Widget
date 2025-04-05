@@ -160,8 +160,6 @@ def start_car():
 @app.route('/start_climate', methods=['POST'])
 def start_climate():
     print("Received request to /start_climate")
-    data = request.get_json(force=True)
-    print(f"📦 Incoming payload: {data}")
 
     if request.headers.get("Authorization") != SECRET_KEY:
         print("Unauthorized request: Missing or incorrect Authorization header")
@@ -170,6 +168,8 @@ def start_climate():
     try:
         print("Refreshing vehicle states...")
         vehicle_manager.update_all_vehicles_with_cached_state()
+        data = request.get_json(force=True)
+        print(f"📦 Incoming payload: {data}")
 
         # Create ClimateRequestOptions object
         climate_options = ClimateRequestOptions(
