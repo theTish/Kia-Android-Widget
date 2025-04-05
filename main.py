@@ -173,16 +173,16 @@ def start_climate():
 
         # Create ClimateRequestOptions object
         climate_options = ClimateRequestOptions(
-            climate=payload.get("climate", True),
-            set_temp=payload.get("set_temp", 21),
-            defrost=payload.get("defrost", False),
-            heating=payload.get("heating", 1),
-            duration=payload.get("duration", 10),
-            front_left_seat=payload.get("front_left_seat", 0),
-            front_right_seat=payload.get("front_right_seat", 0),
-            rear_left_seat=payload.get("rear_left_seat", 0),
-            rear_right_seat=payload.get("rear_right_seat", 0),
-            steering_wheel=payload.get("steering_wheel", 0)
+            climate=data.get("climate", True),
+            set_temp=data.get("set_temp", 21),
+            defrost=data.get("defrost", False),
+            heating=data.get("heating", 1),
+            duration=data.get("duration", 10),
+            front_left_seat=data.get("front_left_seat", 0),
+            front_right_seat=data.get("front_right_seat", 0),
+            rear_left_seat=data.get("rear_left_seat", 0),
+            rear_right_seat=data.get("rear_right_seat", 0),
+            steering_wheel=data.get("steering_wheel", 0)
         )
 
         # Start climate control using the VehicleManager's start_climate method
