@@ -118,6 +118,7 @@ def vehicle_status():
         response = {
             "battery_percentage": int(vehicle.ev_battery_percentage),
             "battery_12v": int(vehicle.car_battery_percentage),
+            "charge_duration": int(vehicle.ev_estimated_current_charge_duration),
             "is_charging": bool(vehicle.ev_battery_is_charging),
             "plugged_in": bool(int(vehicle.ev_battery_is_plugged_in)),
             "is_locked": bool(vehicle.is_locked),
