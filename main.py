@@ -114,7 +114,7 @@ def vehicle_status():
     try:
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
-        charge_limits = vehicle_manager.api._get_charge_limits()
+        charge_limits = vehicle_manager.api._get_charge_limits(token, vehicle)
 
         response = {
             "battery_percentage": int(vehicle.ev_battery_percentage),
