@@ -115,6 +115,10 @@ def vehicle_status():
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
         charge_limits = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
+    
+    import json
+        print("🚨 Raw vehicle data:")
+        print(json.dumps(vehicle.data, indent=2))
 
         response = {
             "battery_percentage": int(vehicle.ev_battery_percentage),
