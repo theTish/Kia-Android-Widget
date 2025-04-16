@@ -116,10 +116,6 @@ def vehicle_status():
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
         charge_limits = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
     
-    import json
-        print("🚨 Raw vehicle data:")
-        print(json.dumps(vehicle.data, indent=2))
-
         response = {
             "battery_percentage": int(vehicle.ev_battery_percentage),
             "battery_12v": int(vehicle.car_battery_percentage),
@@ -138,6 +134,10 @@ def vehicle_status():
             }
         }
 
+    import json
+        print("🚨 Raw vehicle data:")
+        print(json.dumps(vehicle.data, indent=2))
+        
         return jsonify(response), 200
 
     except Exception as e:
