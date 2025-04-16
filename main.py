@@ -134,10 +134,7 @@ def vehicle_status():
             }
         }
 
-    import json
-        print("🚨 Raw vehicle data:")
-        print(json.dumps(vehicle.data, indent=2))
-        
+      
         return jsonify(response), 200
 
     except Exception as e:
