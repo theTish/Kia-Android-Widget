@@ -117,20 +117,32 @@ def vehicle_status():
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
         charge_limits = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
 
-        # 🔋 Estimated Charging Power (kW)
+        # 🎯 Determine charge target % (AC vs DC)
+        target_limit = None
+        if vehicle.ev_battery_is_plugged_in == 1:
+            target_limit = charge_limits["acLimit"]
+        elif vehicle.ev_battery_is_plugged_in == 2:
+            target_limit = charge_limits["dcLimit"]
+
+        # ⚡ Estimate charging power (kW)
         estimated_kw = None
-        if vehicle.ev_battery_is_plugged_in and vehicle.ev_estimated_current_charge_duration > 0:
-            battery_capacity_kwh = 77.4
-            percent_remaining = 100 - vehicle.ev_battery_percentage
+        if (
+            vehicle.ev_battery_is_plugged_in and 
+            vehicle.ev_estimated_current_charge_duration > 0 and 
+            target_limit is not None and 
+            target_limit > vehicle.ev_battery_percentage
+        ):
+            battery_capacity_kwh = 77.4  # EV6 LR battery
+            percent_remaining = target_limit - vehicle.ev_battery_percentage
             time_hours = vehicle.ev_estimated_current_charge_duration / 60
             estimated_kw = round((battery_capacity_kwh * (percent_remaining / 100)) / time_hours, 1)
 
-        # ⏰ Estimated Time Charging Will Finish (ETA)
+        # ⏰ Estimate charge finish time (ETA)
         eta = None
         if vehicle.ev_battery_is_plugged_in and vehicle.ev_estimated_current_charge_duration > 0:
             now = datetime.now()
             eta_dt = now + timedelta(minutes=vehicle.ev_estimated_current_charge_duration)
-            eta = eta_dt.strftime("%-I:%M %p")  # e.g., "2:48 PM"
+            eta = eta_dt.strftime("%-I:%M %p")  # e.g. "2:48 PM"
 
         response = {
             "battery_percentage": int(vehicle.ev_battery_percentage),
@@ -138,6 +150,7 @@ def vehicle_status():
             "charge_duration": int(vehicle.ev_estimated_current_charge_duration),
             "estimated_charging_power_kw": estimated_kw,
             "charging_eta": eta,
+            "target_charge_limit": target_limit,
             "is_charging": bool(vehicle.ev_battery_is_charging),
             "plugged_in": bool(int(vehicle.ev_battery_is_plugged_in)),
             "is_locked": bool(vehicle.is_locked),
