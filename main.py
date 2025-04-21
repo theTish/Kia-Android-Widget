@@ -3,6 +3,7 @@ import os
 from flask import Flask, request, jsonify
 from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
 from hyundai_kia_connect_api.exceptions import AuthenticationError
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -115,11 +116,28 @@ def vehicle_status():
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
         charge_limits = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
-    
+
+        # 🔋 Estimated Charging Power (kW)
+        estimated_kw = None
+        if vehicle.ev_battery_is_plugged_in and vehicle.ev_estimated_current_charge_duration > 0:
+            battery_capacity_kwh = 77.4
+            percent_remaining = 100 - vehicle.ev_battery_percentage
+            time_hours = vehicle.ev_estimated_current_charge_duration / 60
+            estimated_kw = round((battery_capacity_kwh * (percent_remaining / 100)) / time_hours, 1)
+
+        # ⏰ Estimated Time Charging Will Finish (ETA)
+        eta = None
+        if vehicle.ev_battery_is_plugged_in and vehicle.ev_estimated_current_charge_duration > 0:
+            now = datetime.now()
+            eta_dt = now + timedelta(minutes=vehicle.ev_estimated_current_charge_duration)
+            eta = eta_dt.strftime("%-I:%M %p")  # e.g., "2:48 PM"
+
         response = {
             "battery_percentage": int(vehicle.ev_battery_percentage),
             "battery_12v": int(vehicle.car_battery_percentage),
             "charge_duration": int(vehicle.ev_estimated_current_charge_duration),
+            "estimated_charging_power_kw": estimated_kw,
+            "charging_eta": eta,
             "is_charging": bool(vehicle.ev_battery_is_charging),
             "plugged_in": bool(int(vehicle.ev_battery_is_plugged_in)),
             "is_locked": bool(vehicle.is_locked),
@@ -134,12 +152,12 @@ def vehicle_status():
             }
         }
 
-      
         return jsonify(response), 200
 
     except Exception as e:
         print(f"Error in /status: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 #Start Car Endpoint
 @app.route('/start_car', methods=['POST'])
