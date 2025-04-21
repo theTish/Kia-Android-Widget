@@ -158,7 +158,6 @@ def vehicle_status():
         print(f"Error in /status: {e}")
         return jsonify({"error": str(e)}), 500
 
-
 #Start Car Endpoint
 @app.route('/start_car', methods=['POST'])
 def start_car():
