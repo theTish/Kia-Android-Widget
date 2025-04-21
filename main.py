@@ -122,11 +122,13 @@ def vehicle_status():
         charge_limits_raw = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
         charge_limits = charge_limits_raw[0] if isinstance(charge_limits_raw, list) else charge_limits_raw
 
-        # 🎯 Determine charge target % (AC vs DC)
+       # 🎯 Determine charge target % (AC vs DC)
         target_limit = None
-        if vehicle.ev_battery_is_plugged_in == 1:
+        plugged_in_type = int(vehicle.ev_battery_is_plugged_in)
+
+        if plugged_in_type == 1:
             target_limit = charge_limits.get("acLimit")
-        elif vehicle.ev_battery_is_plugged_in == 2:
+        elif plugged_in_type == 2:
             target_limit = charge_limits.get("dcLimit")
 
         # ⚡ Estimate charging power (kW)
