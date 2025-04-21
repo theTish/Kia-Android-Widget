@@ -110,6 +110,8 @@ from datetime import datetime, timedelta
 @app.route('/status', methods=['POST'])
 def vehicle_status():
     print("Received request to /status")
+    print(f"🔌 Plugged in raw value: {vehicle.ev_battery_is_plugged_in}")
+    print(f"⚙️ Charge limits: {charge_limits}")
 
     if request.headers.get("Authorization") != SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 403
@@ -124,11 +126,15 @@ def vehicle_status():
 
        # 🎯 Determine charge target % (AC vs DC)
         target_limit = None
-        plugged_in_type = int(vehicle.ev_battery_is_plugged_in)
 
-        if plugged_in_type == 1:
+        try:
+            plug_type = int(vehicle.ev_battery_is_plugged_in)
+        except (ValueError, TypeError):
+            plug_type = 0
+
+        if plug_type == 1:
             target_limit = charge_limits.get("acLimit")
-        elif plugged_in_type == 2:
+        elif plug_type == 2:
             target_limit = charge_limits.get("dcLimit")
 
         # ⚡ Estimate charging power (kW)
