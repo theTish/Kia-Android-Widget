@@ -105,8 +105,6 @@ def list_vehicles():
         return jsonify({"error": str(e)}), 500
 
 #Vehicle Status Endpoint
-from datetime import datetime, timedelta
-
 @app.route('/status', methods=['POST'])
 def vehicle_status():
     print("Received request to /status")
@@ -158,41 +156,7 @@ def vehicle_status():
             time_hours = vehicle.ev_estimated_current_charge_duration / 60
             estimated_kw = round((battery_capacity_kwh * (percent_remaining / 100)) / time_hours, 1)
 
-        # ⏰ Charging ETA
-        eta = None
-        if plug_type and vehicle.ev_estimated_current_charge_duration > 0:
-            now = datetime.now()
-            eta_dt = now + timedelta(minutes=vehicle.ev_estimated_current_charge_duration)
-            eta = eta_dt.strftime("%-I:%M %p")  # e.g., "11:48 PM"
-
-        response = {
-            "battery_percentage": int(vehicle.ev_battery_percentage),
-            "battery_12v": int(vehicle.car_battery_percentage),
-            "charge_duration": int(vehicle.ev_estimated_current_charge_duration),
-            "estimated_charging_power_kw": estimated_kw,
-            "charging_eta": eta,
-            "target_charge_limit": target_limit,
-            "is_charging": bool(vehicle.ev_battery_is_charging),
-            "plugged_in": bool(plug_type > 0),
-            "is_locked": bool(vehicle.is_locked),
-            "engine_running": bool(vehicle.engine_is_running),
-            "doors": {
-                "front_left": bool(int(vehicle.front_left_door_is_open)),
-                "front_right": bool(int(vehicle.front_right_door_is_open)),
-                "back_left": bool(int(vehicle.back_left_door_is_open)),
-                "back_right": bool(int(vehicle.back_right_door_is_open)),
-                "trunk": bool(vehicle.trunk_is_open),
-                "hood": bool(vehicle.hood_is_open)
-            }
-        }
-
-        return jsonify(response), 200
-
-    except Exception as e:
-        import traceback
-        print(f"❌ Error in /status: {e}")
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        #
 
 #Start Car Endpoint
 @app.route('/start_car', methods=['POST'])
