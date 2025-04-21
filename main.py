@@ -110,8 +110,6 @@ from datetime import datetime, timedelta
 @app.route('/status', methods=['POST'])
 def vehicle_status():
     print("Received request to /status")
-    print(f"🔌 Plugged in raw value: {vehicle.ev_battery_is_plugged_in}")
-    print(f"⚙️ Charge limits: {charge_limits}")
 
     if request.headers.get("Authorization") != SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 403
@@ -119,7 +117,10 @@ def vehicle_status():
     try:
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
-
+        
+        print(f"🔌 Plugged in raw value: {vehicle.ev_battery_is_plugged_in}")
+        print(f"⚙️ Charge limits: {charge_limits}")
+        
         # 🔧 Safe handling of charge_limits (list or dict)
         charge_limits_raw = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
         charge_limits = charge_limits_raw[0] if isinstance(charge_limits_raw, list) else charge_limits_raw
