@@ -117,7 +117,6 @@ def vehicle_status():
     try:
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
-        
         print(f"🔌 Plugged in raw value: {vehicle.ev_battery_is_plugged_in}")
         print(f"⚙️ Charge limits: {charge_limits}")
         
