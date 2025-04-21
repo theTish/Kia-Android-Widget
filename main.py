@@ -105,8 +105,6 @@ def list_vehicles():
         return jsonify({"error": str(e)}), 500
 
 #Vehicle Status Endpoint
-from datetime import datetime, timedelta
-
 @app.route('/status', methods=['POST'])
 def vehicle_status():
     print("Received request to /status")
@@ -117,21 +115,28 @@ def vehicle_status():
     try:
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
-        print(f"🔌 Plugged in raw value: {vehicle.ev_battery_is_plugged_in}")
-        print(f"⚙️ Charge limits: {charge_limits}")
-        
-        # 🔧 Safe handling of charge_limits (list or dict)
-        charge_limits_raw = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
-        charge_limits = charge_limits_raw[0] if isinstance(charge_limits_raw, list) else charge_limits_raw
 
-       # 🎯 Determine charge target % (AC vs DC)
-        target_limit = None
+        # ✅ Always define charge_limits
+        charge_limits = {}
 
+        # 🔧 Get charge limits safely
+        try:
+            charge_limits_raw = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
+            charge_limits = charge_limits_raw[0] if isinstance(charge_limits_raw, list) else charge_limits_raw
+            print(f"⚙️ Charge limits: {charge_limits}")
+        except Exception as e:
+            print(f"❌ Failed to get charge limits: {e}")
+
+        # 🔌 Determine plug type and target charge limit
         try:
             plug_type = int(vehicle.ev_battery_is_plugged_in)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
+            print(f"❌ Failed to parse plug type: {e}")
             plug_type = 0
 
+        print(f"🔌 Plugged in raw value: {vehicle.ev_battery_is_plugged_in} → parsed as {plug_type}")
+
+        target_limit = None
         if plug_type == 1:
             target_limit = charge_limits.get("acLimit")
         elif plug_type == 2:
@@ -140,22 +145,22 @@ def vehicle_status():
         # ⚡ Estimate charging power (kW)
         estimated_kw = None
         if (
-            vehicle.ev_battery_is_plugged_in
-            and vehicle.ev_estimated_current_charge_duration > 0
-            and target_limit is not None
-            and target_limit > vehicle.ev_battery_percentage
+            plug_type in [1, 2] and
+            vehicle.ev_estimated_current_charge_duration > 0 and
+            target_limit is not None and
+            target_limit > vehicle.ev_battery_percentage
         ):
-            battery_capacity_kwh = 77.4
+            battery_capacity_kwh = 77.4  # EV6 LR battery
             percent_remaining = target_limit - vehicle.ev_battery_percentage
             time_hours = vehicle.ev_estimated_current_charge_duration / 60
             estimated_kw = round((battery_capacity_kwh * (percent_remaining / 100)) / time_hours, 1)
 
         # ⏰ Estimate charge finish time (ETA)
         eta = None
-        if vehicle.ev_battery_is_plugged_in and vehicle.ev_estimated_current_charge_duration > 0:
+        if plug_type and vehicle.ev_estimated_current_charge_duration > 0:
             now = datetime.now()
             eta_dt = now + timedelta(minutes=vehicle.ev_estimated_current_charge_duration)
-            eta = eta_dt.strftime("%-I:%M %p")  # "2:48 PM" format
+            eta = eta_dt.strftime("%-I:%M %p")  # 12-hour format (e.g. 2:48 PM)
 
         response = {
             "battery_percentage": int(vehicle.ev_battery_percentage),
@@ -165,7 +170,7 @@ def vehicle_status():
             "charging_eta": eta,
             "target_charge_limit": target_limit,
             "is_charging": bool(vehicle.ev_battery_is_charging),
-            "plugged_in": bool(int(vehicle.ev_battery_is_plugged_in)),
+            "plugged_in": bool(plug_type > 0),
             "is_locked": bool(vehicle.is_locked),
             "engine_running": bool(vehicle.engine_is_running),
             "doors": {
@@ -185,6 +190,7 @@ def vehicle_status():
         print(f"❌ Error in /status: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
 
 #Start Car Endpoint
 @app.route('/start_car', methods=['POST'])
