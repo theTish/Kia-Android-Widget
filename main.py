@@ -105,6 +105,8 @@ def list_vehicles():
         return jsonify({"error": str(e)}), 500
 
 #Vehicle Status Endpoint
+from datetime import datetime, timedelta
+
 @app.route('/status', methods=['POST'])
 def vehicle_status():
     print("Received request to /status")
@@ -119,15 +121,15 @@ def vehicle_status():
         # ✅ Always define charge_limits
         charge_limits = {}
 
-        # 🔧 Get charge limits safely
+        # 🔧 Try fetching charge limits
         try:
             charge_limits_raw = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
             charge_limits = charge_limits_raw[0] if isinstance(charge_limits_raw, list) else charge_limits_raw
-            print(f"⚙️ Charge limits: {charge_limits}")
+            print(f"⚙️ Charge limits raw: {charge_limits}")
         except Exception as e:
             print(f"❌ Failed to get charge limits: {e}")
 
-        # 🔌 Determine plug type and target charge limit
+        # 🔌 Determine plug type
         try:
             plug_type = int(vehicle.ev_battery_is_plugged_in)
         except (ValueError, TypeError) as e:
@@ -136,31 +138,32 @@ def vehicle_status():
 
         print(f"🔌 Plugged in raw value: {vehicle.ev_battery_is_plugged_in} → parsed as {plug_type}")
 
-        target_limit = None
+        # 🎯 Manually define charge limits for AC and DC
         if plug_type == 1:
-            target_limit = charge_limits.get("acLimit")
+            target_limit = 80
         elif plug_type == 2:
-            target_limit = charge_limits.get("dcLimit")
+            target_limit = 100
+        else:
+            target_limit = 100
 
         # ⚡ Estimate charging power (kW)
         estimated_kw = None
         if (
             plug_type in [1, 2] and
             vehicle.ev_estimated_current_charge_duration > 0 and
-            target_limit is not None and
             target_limit > vehicle.ev_battery_percentage
         ):
-            battery_capacity_kwh = 77.4  # EV6 LR battery
+            battery_capacity_kwh = 77.4  # EV6 Long Range
             percent_remaining = target_limit - vehicle.ev_battery_percentage
             time_hours = vehicle.ev_estimated_current_charge_duration / 60
             estimated_kw = round((battery_capacity_kwh * (percent_remaining / 100)) / time_hours, 1)
 
-        # ⏰ Estimate charge finish time (ETA)
+        # ⏰ Charging ETA
         eta = None
         if plug_type and vehicle.ev_estimated_current_charge_duration > 0:
             now = datetime.now()
             eta_dt = now + timedelta(minutes=vehicle.ev_estimated_current_charge_duration)
-            eta = eta_dt.strftime("%-I:%M %p")  # 12-hour format (e.g. 2:48 PM)
+            eta = eta_dt.strftime("%-I:%M %p")  # e.g., "11:48 PM"
 
         response = {
             "battery_percentage": int(vehicle.ev_battery_percentage),
@@ -190,7 +193,6 @@ def vehicle_status():
         print(f"❌ Error in /status: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
 
 #Start Car Endpoint
 @app.route('/start_car', methods=['POST'])
