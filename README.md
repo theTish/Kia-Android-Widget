@@ -1,4 +1,4 @@
-# Kia-Android-Widget-and-iOS-Shortcuts
+# Kia Android Widget and iOS Shortcuts
 
 This project provides a simple API to control your Kia vehicle using the Hyundai Kia Connect API. It includes features such as starting and stopping the climate control, locking and unlocking the car, and listing vehicles.
 
