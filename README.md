@@ -43,6 +43,13 @@ Once the repo is on GitHub, follow these steps to deploy it on Vercel:
 
 ### 4. Deploy the project.
 
+### 6. Create Android Widget
+To build this I have used 2 different tools [Tasker](https://play.google.com/store/apps/details?id=net.dinglisch.android.taskerm&pcampaignid=web_share) and [KWGT](https://play.google.com/store/apps/details?id=org.kustom.widget&pcampaignid=web_share). You can build the Widget in tasker as well, I just haven't tried that yet.
+
+    1. Download Tasker and KWGT
+    2. Download the tasker tasks you want from here
+    3. 
+
 ### 5. Create IOS Shortcuts
 You can create an iOS Shortcut to interact with your Kia Vehicle Control API easily. Follow these steps to set up your Shortcut:
 
