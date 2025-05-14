@@ -110,87 +110,67 @@ def list_vehicles():
 def vehicle_status():
     print("Received request to /status")
 
+    # --- Auth check ---
     if request.headers.get("Authorization") != SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        # Ensure your token is fresh
+        # --- Force a live refresh of this vehicle’s state ---
         vehicle_manager.check_and_refresh_token()
-
-        # Force a direct, live EV‐status pull for this VIN
-        vehicle_manager.force_refresh_vehicles_states(VEHICLE_ID)
-
-        # Now vehicle.ev_charging_current, ev_charging_power, ev_battery_remaining_charging_time, etc. will be populated
+        vehicle_manager.force_refresh_vehicle_state(VEHICLE_ID)
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
-        # ── Grab raw charge limits from the API ──
-        charge_limits = {}
-        try:
-            raw = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
-            charge_limits = raw[0] if isinstance(raw, list) else raw
-            print("⚙️ Charge limits raw:", charge_limits)
-        except Exception as e:
-            print(f"❌ Failed to get charge limits: {e}")
-
-        # ── Determine plug type ──
+        # --- Plug type (0=off, 1=AC, 2=DC) ---
         try:
             plug_type = int(vehicle.ev_battery_is_plugged_in)
         except (ValueError, TypeError):
             plug_type = 0
-        print(f"🔌 Plugged in raw: {vehicle.ev_battery_is_plugged_in} → {plug_type}")
+        print(f"🔌 Plugged in: {plug_type}")
 
-        # ── Parse dynamic AC/DC limits (fallback to 100) ──
-        try:
-            ac_limit = int(charge_limits.get("ev_charge_limits_ac", 100))
-        except (ValueError, TypeError):
-            ac_limit = 100
-        try:
-            dc_limit = int(charge_limits.get("ev_charge_limits_dc", 100))
-        except (ValueError, TypeError):
-            dc_limit = 100
+        # --- Target limit based on plug ---
+        target_limit = 80 if plug_type == 1 else 100
 
-        # ── Choose the right limit ──
-        if plug_type == 1:         # DC
-            target_limit = dc_limit
-        elif plug_type == 2:       # AC
-            target_limit = ac_limit
+        # --- Time remaining (secs → mins) & battery % ---
+        secs_rem = getattr(vehicle, "ev_battery_remaining_charging_time", None)
+        if secs_rem is not None:
+            dur = secs_rem // 60
         else:
-            target_limit = ac_limit  # default if unplugged
-        print(f"🎯 Using target charge limit: {target_limit}%")
-
-        # ── Rest of your calculations ──
-        dur = vehicle.ev_estimated_current_charge_duration
+            dur = vehicle.ev_estimated_current_charge_duration
         pct = vehicle.ev_battery_percentage
 
-        # Estimated power (kW)
+        # --- “Estimated” power (your heuristic) ---
         estimated_kw = None
         if plug_type in [1,2] and dur > 0 and target_limit > pct:
             battery_capacity_kwh = 77.4
             fraction = (target_limit - pct) / 100
-            estimated_kw = round((battery_capacity_kwh * fraction) / (dur/60), 1)
-        print(f"⚡ Estimated power: {estimated_kw} kW")
+            hours = dur / 60
+            estimated_kw = round((battery_capacity_kwh * fraction) / hours, 1)
+        print(f"⚡ Estimated kW: {estimated_kw}")
 
-        # Actual power from current & voltage
-        actual_kw = None
-        try:
-            current = float(vehicle.ev_charging_current)
-            voltage = float(vehicle.ev_charging_voltage)
-            actual_kw = round((current * voltage) / 1000, 1)
-            print(f"⚡ Actual power: {actual_kw} kW")
-        except Exception as e:
-            print(f"❌ Couldn’t compute actual power: {e}")
+        # --- Manufacturer‐provided values ---
+        power_kw = getattr(vehicle, "ev_charging_power", None)
+        amps     = getattr(vehicle, "ev_charging_current", None)
+        volts    = getattr(vehicle, "ev_charging_voltage", None)
+        print(f"⚙️ ev_charging_power: {power_kw}, current: {amps} A, voltage: {volts} V")
 
-        # ETA in Toronto time
-        eta_time = eta_duration = None
-        if plug_type and dur > 0:
-            now = datetime.now(ZoneInfo("America/Toronto"))
-            eta_dt = now + timedelta(minutes=dur)
-            eta_time = eta_dt.strftime("%-I:%M %p")
-            h, m = divmod(dur, 60)
-            eta_duration = f"{h}h {m}m remaining"
+        # --- “Actual” power fallback if needed ---
+        actual_kw = power_kw
+        if actual_kw is None and amps is not None and volts is not None:
+            try:
+                actual_kw = round(float(amps) * float(volts) / 1000, 1)
+            except Exception:
+                actual_kw = None
+        print(f"⚡ Actual kW: {actual_kw}")
 
-        # Build response
-        resp = {
+        # --- Compute ETA in Toronto time ---
+        now = datetime.now(ZoneInfo("America/Toronto"))
+        eta_dt = now + timedelta(minutes=dur)
+        eta_time = eta_dt.strftime("%-I:%M %p")
+        hrs, mins = divmod(dur, 60)
+        eta_duration = f"{hrs}h {mins}m remaining"
+
+        # --- Build and return JSON ---
+        response = {
             "battery_percentage": int(pct),
             "battery_12v": int(vehicle.car_battery_percentage),
             "charge_duration": int(dur),
@@ -207,19 +187,7 @@ def vehicle_status():
                 "front_left": bool(int(vehicle.front_left_door_is_open)),
                 "front_right": bool(int(vehicle.front_right_door_is_open)),
                 "back_left": bool(int(vehicle.back_left_door_is_open)),
-                "back_right": bool(int(vehicle.back_right_door_is_open)),
-                "trunk": bool(vehicle.trunk_is_open),
-                "hood": bool(vehicle.hood_is_open)
-            }
-        }
-
-        return jsonify(resp), 200
-
-    except Exception as e:
-        import traceback
-        print(f"❌ Error in /status: {e}")
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+                "back_right": bool(i_
 
 # Start climate endpoint
 @app.route('/start_climate', methods=['POST'])
