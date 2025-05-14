@@ -118,6 +118,15 @@ def vehicle_status():
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
+        # ── Grab raw charge limits from the API ──
+        charge_limits = {}
+        try:
+            raw = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
+            charge_limits = raw[0] if isinstance(raw, list) else raw
+            print("⚙️ Charge limits raw:", charge_limits)
+        except Exception as e:
+            print(f"❌ Failed to get charge limits: {e}")
+
         # ── Determine plug type ──
         try:
             plug_type = int(vehicle.ev_battery_is_plugged_in)
@@ -125,44 +134,57 @@ def vehicle_status():
             plug_type = 0
         print(f"🔌 Plugged in raw: {vehicle.ev_battery_is_plugged_in} → {plug_type}")
 
-        # ── Target charge limit ──
-        target_limit = 100
-        if plug_type == 1:    target_limit = 80
-        elif plug_type == 2:  target_limit = 100
+        # ── Parse dynamic AC/DC limits (fallback to 100) ──
+        try:
+            ac_limit = int(charge_limits.get("ev_charge_limits_ac", 100))
+        except (ValueError, TypeError):
+            ac_limit = 100
+        try:
+            dc_limit = int(charge_limits.get("ev_charge_limits_dc", 100))
+        except (ValueError, TypeError):
+            dc_limit = 100
 
-        # ── Raw duration & percent ──
-        dur = vehicle.ev_estimated_current_charge_duration  # in minutes
+        # ── Choose the right limit ──
+        if plug_type == 1:         # DC
+            target_limit = dc_limit
+        elif plug_type == 2:       # AC
+            target_limit = ac_limit
+        else:
+            target_limit = ac_limit  # default if unplugged
+        print(f"🎯 Using target charge limit: {target_limit}%")
+
+        # ── Rest of your calculations ──
+        dur = vehicle.ev_estimated_current_charge_duration
         pct = vehicle.ev_battery_percentage
 
-        # ── Estimated average power (your existing calculation) ──
+        # Estimated power (kW)
         estimated_kw = None
         if plug_type in [1,2] and dur > 0 and target_limit > pct:
             battery_capacity_kwh = 77.4
             fraction = (target_limit - pct) / 100
-            hours = dur / 60
-            estimated_kw = round((battery_capacity_kwh * fraction) / hours, 1)
+            estimated_kw = round((battery_capacity_kwh * fraction) / (dur/60), 1)
         print(f"⚡ Estimated power: {estimated_kw} kW")
 
-        # ── Actual power from current & voltage ──
+        # Actual power from current & voltage
         actual_kw = None
         try:
-            current = float(vehicle.ev_charging_current)     # amps
-            voltage = float(vehicle.ev_charging_voltage)     # volts
+            current = float(vehicle.ev_charging_current)
+            voltage = float(vehicle.ev_charging_voltage)
             actual_kw = round((current * voltage) / 1000, 1)
-            print(f"⚡ Actual power: {current} A × {voltage} V = {actual_kw} kW")
+            print(f"⚡ Actual power: {actual_kw} kW")
         except Exception as e:
             print(f"❌ Couldn’t compute actual power: {e}")
 
-        # ── ETA in Toronto time ──
+        # ETA in Toronto time
         eta_time = eta_duration = None
         if plug_type and dur > 0:
             now = datetime.now(ZoneInfo("America/Toronto"))
-            eta = now + timedelta(minutes=dur)
-            eta_time = eta.strftime("%-I:%M %p")
+            eta_dt = now + timedelta(minutes=dur)
+            eta_time = eta_dt.strftime("%-I:%M %p")
             h, m = divmod(dur, 60)
             eta_duration = f"{h}h {m}m remaining"
 
-        # ── Build response ──
+        # Build response
         resp = {
             "battery_percentage": int(pct),
             "battery_12v": int(vehicle.car_battery_percentage),
