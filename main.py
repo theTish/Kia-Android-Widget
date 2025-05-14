@@ -114,8 +114,13 @@ def vehicle_status():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        # ── Refresh vehicle state ──
-        vehicle_manager.update_all_vehicles_with_cached_state()
+        # Ensure your token is fresh
+        vehicle_manager.check_and_refresh_token()
+
+        # Force a direct, live EV‐status pull for this VIN
+        vehicle_manager.force_refresh_vehicles_states(VEHICLE_ID)
+
+        # Now vehicle.ev_charging_current, ev_charging_power, ev_battery_remaining_charging_time, etc. will be populated
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
         # ── Grab raw charge limits from the API ──
