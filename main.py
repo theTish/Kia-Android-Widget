@@ -4,6 +4,7 @@ from flask import Flask, request, jsonify
 from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
 from hyundai_kia_connect_api.exceptions import AuthenticationError
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
 
@@ -105,8 +106,6 @@ def list_vehicles():
         return jsonify({"error": str(e)}), 500
 
 #Vehicle Status Endpoint
-from datetime import datetime, timedelta
-
 @app.route('/status', methods=['POST'])
 def vehicle_status():
     print("Received request to /status")
@@ -115,30 +114,28 @@ def vehicle_status():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
+        # refresh state
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
-        # ✅ Always define charge_limits
+        # ── Charge limits (optional) ──
         charge_limits = {}
-
-        # 🔧 Try fetching charge limits
         try:
-            charge_limits_raw = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
-            charge_limits = charge_limits_raw[0] if isinstance(charge_limits_raw, list) else charge_limits_raw
+            raw = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
+            charge_limits = raw[0] if isinstance(raw, list) else raw
             print(f"⚙️ Charge limits raw: {charge_limits}")
         except Exception as e:
             print(f"❌ Failed to get charge limits: {e}")
 
-        # 🔌 Determine plug type
+        # ── Plug type (0=off, 1=AC, 2=DC) ──
         try:
             plug_type = int(vehicle.ev_battery_is_plugged_in)
         except (ValueError, TypeError) as e:
             print(f"❌ Failed to parse plug type: {e}")
             plug_type = 0
-
         print(f"🔌 Plugged in raw value: {vehicle.ev_battery_is_plugged_in} → parsed as {plug_type}")
 
-        # 🎯 Manually define charge limits for AC and DC
+        # ── Target limit based on plug ──
         if plug_type == 1:
             target_limit = 80
         elif plug_type == 2:
@@ -146,37 +143,34 @@ def vehicle_status():
         else:
             target_limit = 100
 
-        # ⚡ Estimate charging power (kW)
+        # ── Estimate charging power (kW) ──
         estimated_kw = None
-        if (
-            plug_type in [1, 2] and
-            vehicle.ev_estimated_current_charge_duration > 0 and
-            target_limit > vehicle.ev_battery_percentage
-        ):
-            battery_capacity_kwh = 77.4  # EV6 Long Range
-            percent_remaining = target_limit - vehicle.ev_battery_percentage
-            time_hours = vehicle.ev_estimated_current_charge_duration / 60
-            estimated_kw = round((battery_capacity_kwh * (percent_remaining / 100)) / time_hours, 1)
+        dur = vehicle.ev_estimated_current_charge_duration
+        pct = vehicle.ev_battery_percentage
+        if plug_type in [1, 2] and dur > 0 and target_limit > pct:
+            battery_capacity_kwh = 77.4
+            percent_remaining = (target_limit - pct) / 100
+            hours = dur / 60
+            estimated_kw = round((battery_capacity_kwh * percent_remaining) / hours, 1)
 
-        # ⏰ Charging ETA and readable duration
+        # ── Compute ETA in Toronto time ──
         eta_time = None
         eta_duration = None
-        if plug_type and vehicle.ev_estimated_current_charge_duration > 0:
-            now = datetime.now()
-            eta_dt = now + timedelta(minutes=vehicle.ev_estimated_current_charge_duration)
-            eta_time = eta_dt.strftime("%-I:%M %p")  # e.g., "12:08 AM"
-
-            duration_minutes = vehicle.ev_estimated_current_charge_duration
-            hours = duration_minutes // 60
-            minutes = duration_minutes % 60
+        if plug_type and dur > 0:
+            now = datetime.now(ZoneInfo("America/Toronto"))
+            eta_dt = now + timedelta(minutes=dur)
+            eta_time = eta_dt.strftime("%-I:%M %p")
+            hours = dur // 60
+            minutes = dur % 60
             eta_duration = f"{hours}h {minutes}m remaining"
 
+        # ── Build response ──
         response = {
-            "battery_percentage": int(vehicle.ev_battery_percentage),
+            "battery_percentage": int(pct),
             "battery_12v": int(vehicle.car_battery_percentage),
-            "charge_duration": int(vehicle.ev_estimated_current_charge_duration),
-            "charging_eta": eta_time,  # clock time
-            "charging_duration_formatted": eta_duration,  # readable time left
+            "charge_duration": int(dur),
+            "charging_eta": eta_time,
+            "charging_duration_formatted": eta_duration,
             "estimated_charging_power_kw": estimated_kw,
             "target_charge_limit": target_limit,
             "is_charging": bool(vehicle.ev_battery_is_charging),
