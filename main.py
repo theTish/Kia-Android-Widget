@@ -114,64 +114,63 @@ def vehicle_status():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        # refresh state
+        # ── Refresh vehicle state ──
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
-        # ── Charge limits (optional) ──
-        charge_limits = {}
-        try:
-            raw = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
-            charge_limits = raw[0] if isinstance(raw, list) else raw
-            print(f"⚙️ Charge limits raw: {charge_limits}")
-        except Exception as e:
-            print(f"❌ Failed to get charge limits: {e}")
-
-        # ── Plug type (0=off, 1=AC, 2=DC) ──
+        # ── Determine plug type ──
         try:
             plug_type = int(vehicle.ev_battery_is_plugged_in)
-        except (ValueError, TypeError) as e:
-            print(f"❌ Failed to parse plug type: {e}")
+        except (ValueError, TypeError):
             plug_type = 0
-        print(f"🔌 Plugged in raw value: {vehicle.ev_battery_is_plugged_in} → parsed as {plug_type}")
+        print(f"🔌 Plugged in raw: {vehicle.ev_battery_is_plugged_in} → {plug_type}")
 
-        # ── Target limit based on plug ──
-        if plug_type == 1:
-            target_limit = 80
-        elif plug_type == 2:
-            target_limit = 100
-        else:
-            target_limit = 100
+        # ── Target charge limit ──
+        target_limit = 100
+        if plug_type == 1:    target_limit = 80
+        elif plug_type == 2:  target_limit = 100
 
-        # ── Estimate charging power (kW) ──
-        estimated_kw = None
-        dur = vehicle.ev_estimated_current_charge_duration
+        # ── Raw duration & percent ──
+        dur = vehicle.ev_estimated_current_charge_duration  # in minutes
         pct = vehicle.ev_battery_percentage
-        if plug_type in [1, 2] and dur > 0 and target_limit > pct:
-            battery_capacity_kwh = 77.4
-            percent_remaining = (target_limit - pct) / 100
-            hours = dur / 60
-            estimated_kw = round((battery_capacity_kwh * percent_remaining) / hours, 1)
 
-        # ── Compute ETA in Toronto time ──
-        eta_time = None
-        eta_duration = None
+        # ── Estimated average power (your existing calculation) ──
+        estimated_kw = None
+        if plug_type in [1,2] and dur > 0 and target_limit > pct:
+            battery_capacity_kwh = 77.4
+            fraction = (target_limit - pct) / 100
+            hours = dur / 60
+            estimated_kw = round((battery_capacity_kwh * fraction) / hours, 1)
+        print(f"⚡ Estimated power: {estimated_kw} kW")
+
+        # ── Actual power from current & voltage ──
+        actual_kw = None
+        try:
+            current = float(vehicle.ev_charging_current)     # amps
+            voltage = float(vehicle.ev_charging_voltage)     # volts
+            actual_kw = round((current * voltage) / 1000, 1)
+            print(f"⚡ Actual power: {current} A × {voltage} V = {actual_kw} kW")
+        except Exception as e:
+            print(f"❌ Couldn’t compute actual power: {e}")
+
+        # ── ETA in Toronto time ──
+        eta_time = eta_duration = None
         if plug_type and dur > 0:
             now = datetime.now(ZoneInfo("America/Toronto"))
-            eta_dt = now + timedelta(minutes=dur)
-            eta_time = eta_dt.strftime("%-I:%M %p")
-            hours = dur // 60
-            minutes = dur % 60
-            eta_duration = f"{hours}h {minutes}m remaining"
+            eta = now + timedelta(minutes=dur)
+            eta_time = eta.strftime("%-I:%M %p")
+            h, m = divmod(dur, 60)
+            eta_duration = f"{h}h {m}m remaining"
 
         # ── Build response ──
-        response = {
+        resp = {
             "battery_percentage": int(pct),
             "battery_12v": int(vehicle.car_battery_percentage),
             "charge_duration": int(dur),
             "charging_eta": eta_time,
             "charging_duration_formatted": eta_duration,
             "estimated_charging_power_kw": estimated_kw,
+            "actual_charging_power_kw": actual_kw,
             "target_charge_limit": target_limit,
             "is_charging": bool(vehicle.ev_battery_is_charging),
             "plugged_in": bool(plug_type > 0),
@@ -187,7 +186,7 @@ def vehicle_status():
             }
         }
 
-        return jsonify(response), 200
+        return jsonify(resp), 200
 
     except Exception as e:
         import traceback
