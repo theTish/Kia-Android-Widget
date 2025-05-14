@@ -1,3 +1,3 @@
 Flask
-hyundai-kia-connect-api
+hyundai-kia-connect-api~=3.41.4
 requests
