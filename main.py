@@ -106,75 +106,86 @@ def list_vehicles():
         return jsonify({"error": str(e)}), 500
 
 #Vehicle Status Endpoint
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
-
 @app.route('/status', methods=['POST'])
 def vehicle_status():
     print("Received request to /status")
 
-    # --- Auth check ---
     if request.headers.get("Authorization") != SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        # --- Refresh token and force a live pull ---
-        vehicle_manager.check_and_refresh_token()
-        vehicle_manager.force_refresh_vehicle_state(VEHICLE_ID)
+        # ── Refresh vehicle state ──
+        vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
-        # --- Determine plug type (0=off, 1=AC, 2=DC) ---
+        # ── Grab raw charge limits from the API ──
+        charge_limits = {}
+        try:
+            raw = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
+            charge_limits = raw[0] if isinstance(raw, list) else raw
+            print("⚙️ Charge limits raw:", charge_limits)
+        except Exception as e:
+            print(f"❌ Failed to get charge limits: {e}")
+
+        # ── Determine plug type ──
         try:
             plug_type = int(vehicle.ev_battery_is_plugged_in)
         except (ValueError, TypeError):
             plug_type = 0
         print(f"🔌 Plugged in raw: {vehicle.ev_battery_is_plugged_in} → {plug_type}")
 
-        # --- Set target limit based on plug type ---
-        target_limit = 80 if plug_type == 1 else 100
+        # ── Parse dynamic AC/DC limits (fallback to 100) ──
+        try:
+            ac_limit = int(charge_limits.get("ev_charge_limits_ac", 100))
+        except (ValueError, TypeError):
+            ac_limit = 100
+        try:
+            dc_limit = int(charge_limits.get("ev_charge_limits_dc", 100))
+        except (ValueError, TypeError):
+            dc_limit = 100
 
-        # --- Compute remaining duration in minutes ---
-        secs_rem = getattr(vehicle, "ev_battery_remaining_charging_time", None)
-        if secs_rem is not None:
-            dur = secs_rem // 60
+        # ── Choose the right limit ──
+        if plug_type == 1:         # DC
+            target_limit = dc_limit
+        elif plug_type == 2:       # AC
+            target_limit = ac_limit
         else:
-            dur = vehicle.ev_estimated_current_charge_duration
+            target_limit = ac_limit  # default if unplugged
+        print(f"🎯 Using target charge limit: {target_limit}%")
+
+        # ── Rest of your calculations ──
+        dur = vehicle.ev_estimated_current_charge_duration
         pct = vehicle.ev_battery_percentage
 
-        # --- Estimated power (your heuristic) ---
+        # Estimated power (kW)
         estimated_kw = None
-        if plug_type in [1, 2] and dur > 0 and target_limit > pct:
+        if plug_type in [1,2] and dur > 0 and target_limit > pct:
             battery_capacity_kwh = 77.4
-            percent_remaining = (target_limit - pct) / 100
-            hours = dur / 60
-            estimated_kw = round((battery_capacity_kwh * percent_remaining) / hours, 1)
+            fraction = (target_limit - pct) / 100
+            estimated_kw = round((battery_capacity_kwh * fraction) / (dur/60), 1)
         print(f"⚡ Estimated power: {estimated_kw} kW")
 
-        # --- Raw EV metrics from API binding ---
-        amps     = getattr(vehicle, "ev_charging_current", None)
-        volts    = getattr(vehicle, "ev_charging_voltage",     None)
-        power_kw = getattr(vehicle, "ev_charging_power",       None)
-        print(f"⚙️ Raw EV metrics – current: {amps} A, voltage: {volts} V, power: {power_kw} kW")
+        # Actual power from current & voltage
+        actual_kw = None
+        try:
+            current = float(vehicle.ev_charging_current)
+            voltage = float(vehicle.ev_charging_voltage)
+            actual_kw = round((current * voltage) / 1000, 1)
+            print(f"⚡ Actual power: {actual_kw} kW")
+        except Exception as e:
+            print(f"❌ Couldn’t compute actual power: {e}")
 
-        # --- Fallback actual power calc if needed ---
-        actual_kw = power_kw
-        if actual_kw is None and amps is not None and volts is not None:
-            try:
-                actual_kw = round(float(amps) * float(volts) / 1000, 1)
-            except Exception as e:
-                print(f"❌ Error computing actual_kw: {e}")
-                actual_kw = None
-        print(f"⚡ Actual power: {actual_kw} kW")
+        # ETA in Toronto time
+        eta_time = eta_duration = None
+        if plug_type and dur > 0:
+            now = datetime.now(ZoneInfo("America/Toronto"))
+            eta_dt = now + timedelta(minutes=dur)
+            eta_time = eta_dt.strftime("%-I:%M %p")
+            h, m = divmod(dur, 60)
+            eta_duration = f"{h}h {m}m remaining"
 
-        # --- Compute ETA in America/Toronto ---
-        now    = datetime.now(ZoneInfo("America/Toronto"))
-        eta_dt = now + timedelta(minutes=dur)
-        eta_time = eta_dt.strftime("%-I:%M %p")
-        hrs, mins = divmod(dur, 60)
-        eta_duration = f"{hrs}h {mins}m remaining"
-
-        # --- Build response payload ---
-        response = {
+        # Build response
+        resp = {
             "battery_percentage": int(pct),
             "battery_12v": int(vehicle.car_battery_percentage),
             "charge_duration": int(dur),
@@ -188,16 +199,16 @@ def vehicle_status():
             "is_locked": bool(vehicle.is_locked),
             "engine_running": bool(vehicle.engine_is_running),
             "doors": {
-                "front_left":  bool(int(vehicle.front_left_door_is_open)),
+                "front_left": bool(int(vehicle.front_left_door_is_open)),
                 "front_right": bool(int(vehicle.front_right_door_is_open)),
-                "back_left":   bool(int(vehicle.back_left_door_is_open)),
-                "back_right":  bool(int(vehicle.back_right_door_is_open)),
-                "trunk":       bool(vehicle.trunk_is_open),
-                "hood":        bool(vehicle.hood_is_open)
+                "back_left": bool(int(vehicle.back_left_door_is_open)),
+                "back_right": bool(int(vehicle.back_right_door_is_open)),
+                "trunk": bool(vehicle.trunk_is_open),
+                "hood": bool(vehicle.hood_is_open)
             }
         }
 
-        return jsonify(response), 200
+        return jsonify(resp), 200
 
     except Exception as e:
         import traceback
