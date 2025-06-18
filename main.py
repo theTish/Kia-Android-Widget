@@ -176,13 +176,18 @@ def vehicle_status():
             print(f"❌ Couldn’t compute actual power: {e}")
 
         # ── Pull raw values from evStatus (if available) ──
-        ev_status = vehicle.raw_vehicle_data.get("vehicleStatus", {}).get("evStatus", {})
-
+        try:
+            raw_status = vehicle_manager.api._get_cached_vehicle_status(vehicle_manager.token, vehicle)
+            ev_status = raw_status.get("vehicleStatus", {}).get("evStatus", {})
+        except Exception as e:
+            print(f"❌ Could not fetch evStatus: {e}")
+            ev_status = {}
+        
         api_charging_power = ev_status.get("chargingPower")
         api_estimated_power = ev_status.get("estimatedChargingPow")
-
+        
         print(f"⚙️ API chargingPower: {api_charging_power}, estimatedChargingPow: {api_estimated_power}")
-
+        
         # Fallback logic if actual_kw is missing
         actual_kw = actual_kw or api_charging_power
         estimated_kw = estimated_kw or api_estimated_power
