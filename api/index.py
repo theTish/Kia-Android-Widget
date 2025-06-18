@@ -1,7 +1,7 @@
 
 import os
 from flask import Flask, request, jsonify
-from hyundai_kia_connect_api.HyundaiBlueLink import HyundaiBlueLink
+from hyundai_kia_connect_api import VehicleManager
 from hyundai_kia_connect_api.const import Brand, Region
 from hyundai_kia_connect_api.exceptions import AuthenticationError
 from datetime import datetime, timedelta
