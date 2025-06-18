@@ -176,8 +176,7 @@ def vehicle_status():
             print(f"❌ Couldn’t compute actual power: {e}")
 
         # ── Pull raw values from evStatus (if available) ──
-        raw_status = vehicle_manager.api.get_cached_vehicle_status(vehicle)
-        ev_status = raw_status.get("vehicleStatus", {}).get("evStatus", {})
+        ev_status = vehicle.raw_vehicle_data.get("vehicleStatus", {}).get("evStatus", {})
 
         api_charging_power = ev_status.get("chargingPower")
         api_estimated_power = ev_status.get("estimatedChargingPow")
