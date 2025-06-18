@@ -1,7 +1,6 @@
 import os
 from flask import Flask, request, jsonify
-from hyundai_kia_connect_api.KiaUvoApiCA import KiaUvoApiCA
-from hyundai_kia_connect_api.const import Brand, Region
+from hyundai_kia_connect_api import VehicleManager
 
 app = Flask(__name__)
 
@@ -10,7 +9,17 @@ PASSWORD = os.getenv("KIA_PASSWORD")
 PIN = os.getenv("KIA_PIN")
 SECRET_KEY = os.getenv("SECRET_KEY")
 
-client = KiaUvoApiCA(username=USERNAME, password=PASSWORD, pin=PIN, region=Region.CA, brand=Brand.KIA)
+vehicle_manager = VehicleManager(
+    region=2,  # North America
+    brand=1,   # KIA
+    username=USERNAME,
+    password=PASSWORD,
+    pin=str(PIN)
+)
+
+@app.route("/", methods=["GET"])
+def root():
+    return jsonify({"status": "API is running"}), 200
 
 @app.route("/status", methods=["POST"])
 def status():
@@ -18,22 +27,19 @@ def status():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        vehicle_list = client.get_vehicles()
-        vehicle = vehicle_list[0]
-
-        status = client.get_cached_vehicle_status(vehicle)
-
-        battery = status.get("battery", {})
-        charging = status.get("charging", {})
+        vehicle_manager.update_all_vehicles_with_cached_state()
+        vehicle = vehicle_manager.get_first_vehicle()
+        data = getattr(vehicle, "_vehicle_data", {})
+        ev_status = data.get("vehicleStatus", {}).get("evStatus", {})
 
         return jsonify({
-            "battery_percentage": battery.get("batteryLevel", "unknown"),
-            "is_charging": charging.get("isCharging", False),
-            "plugged_in": charging.get("isPluggedIn", False),
-            "estimated_charging_power_kw": charging.get("estimatedChargingPower", None),
-            "charge_duration": charging.get("chargeTimeRemaining", None),
-            "charging_eta": charging.get("chargingEndTime", None),
-            "target_charge_limit": charging.get("targetSOCLevel", 100)
+            "battery_percentage": ev_status.get("batteryLevel", "unknown"),
+            "is_charging": ev_status.get("charging", False),
+            "plugged_in": ev_status.get("plugged", False),
+            "estimated_charging_power_kw": ev_status.get("estimatedChargingPow", None),
+            "charge_duration": ev_status.get("remainTime2", None),
+            "charging_eta": ev_status.get("chargingEndTime", None),
+            "target_charge_limit": ev_status.get("targetSOCLevel", None),
         })
 
     except Exception as e:
