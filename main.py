@@ -314,7 +314,7 @@ def debug_vehicle():
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
         # Fetch raw cached vehicle status directly from API
-        raw_status = vehicle_manager.api._get_cached_vehicle_status(vehicle_manager.token, vehicle)
+        raw_status = vehicle_manager.get_cached_vehicle_status(vehicle)
         ev_status = raw_status.get("vehicleStatus", {}).get("evStatus", {})
 
         print("🔎 evStatus keys:", list(ev_status.keys()))
