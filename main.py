@@ -157,13 +157,13 @@ def vehicle_status():
         dur = vehicle.ev_estimated_current_charge_duration
         pct = vehicle.ev_battery_percentage
 
-        # Estimated power (kW)
+        # Estimated power (kW) from battery % math
         estimated_kw = None
-        if plug_type in [1,2] and dur > 0 and target_limit > pct:
+        if plug_type in [1, 2] and dur > 0 and target_limit > pct:
             battery_capacity_kwh = 77.4
             fraction = (target_limit - pct) / 100
-            estimated_kw = round((battery_capacity_kwh * fraction) / (dur/60), 1)
-        print(f"⚡ Estimated power: {estimated_kw} kW")
+            estimated_kw = round((battery_capacity_kwh * fraction) / (dur / 60), 1)
+        print(f"⚡ Estimated power (calculated): {estimated_kw} kW")
 
         # Actual power from current & voltage
         actual_kw = None
@@ -171,9 +171,22 @@ def vehicle_status():
             current = float(vehicle.ev_charging_current)
             voltage = float(vehicle.ev_charging_voltage)
             actual_kw = round((current * voltage) / 1000, 1)
-            print(f"⚡ Actual power: {actual_kw} kW")
+            print(f"⚡ Actual power (calculated): {actual_kw} kW")
         except Exception as e:
             print(f"❌ Couldn’t compute actual power: {e}")
+
+        # ── Pull raw values from evStatus (if available) ──
+        raw_status = vehicle_manager.api.get_cached_vehicle_status(vehicle)
+        ev_status = raw_status.get("vehicleStatus", {}).get("evStatus", {})
+
+        api_charging_power = ev_status.get("chargingPower")
+        api_estimated_power = ev_status.get("estimatedChargingPow")
+
+        print(f"⚙️ API chargingPower: {api_charging_power}, estimatedChargingPow: {api_estimated_power}")
+
+        # Fallback logic if actual_kw is missing
+        actual_kw = actual_kw or api_charging_power
+        estimated_kw = estimated_kw or api_estimated_power
 
         # ETA in Toronto time
         eta_time = eta_duration = None
@@ -214,66 +227,6 @@ def vehicle_status():
         import traceback
         print(f"❌ Error in /status: {e}")
         traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-# Start climate endpoint
-@app.route('/start_climate', methods=['POST'])
-def start_climate():
-    print("Received request to /start_climate")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request: Missing or incorrect Authorization header")
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        print("Refreshing vehicle states...")
-        vehicle_manager.update_all_vehicles_with_cached_state()
-        data = request.get_json(force=True)
-        print(f"📦 Incoming payload: {data}")
-
-        # Create ClimateRequestOptions object
-        climate_options = ClimateRequestOptions(
-            climate=data.get("climate", True),
-            set_temp=data.get("set_temp", 21),
-            defrost=data.get("defrost", False),
-            heating=data.get("heating", 1),
-            duration=data.get("duration", 10),
-            front_left_seat=data.get("front_left_seat", 0),
-            front_right_seat=data.get("front_right_seat", 0),
-            rear_left_seat=data.get("rear_left_seat", 0),
-            rear_right_seat=data.get("rear_right_seat", 0),
-            steering_wheel=data.get("steering_wheel", 0)
-        )
-
-        # Start climate control using the VehicleManager's start_climate method
-        result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
-        print(f"Start climate result: {result}")
-
-        return jsonify({"status": "Climate started", "result": result}), 200
-    except Exception as e:
-        print(f"Error in /start_climate: {e}")
-        return jsonify({"error": str(e)}), 500
-
-# Stop climate endpoint
-@app.route('/stop_climate', methods=['POST'])
-def stop_climate():
-    print("Received request to /stop_climate")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request: Missing or incorrect Authorization header")
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        print("Refreshing vehicle states...")
-        vehicle_manager.update_all_vehicles_with_cached_state()
-
-        # Stop climate control using the VehicleManager's stop_climate method
-        result = vehicle_manager.stop_climate(VEHICLE_ID)
-        print(f"Stop climate result: {result}")
-
-        return jsonify({"status": "Climate stopped", "result": result}), 200
-    except Exception as e:
-        print(f"Error in /stop_climate: {e}")
         return jsonify({"error": str(e)}), 500
 
 # Unlock car endpoint
