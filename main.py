@@ -313,14 +313,20 @@ def debug_vehicle():
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
-        # Dump the object to see what it has
-        vehicle_dict = vehicle.__dict__
-        print("Vehicle object keys:", list(vehicle_dict.keys()))
+        # Fetch raw cached vehicle status directly from API
+        raw_status = vehicle_manager.api._get_cached_vehicle_status(vehicle_manager.token, vehicle)
+        ev_status = raw_status.get("vehicleStatus", {}).get("evStatus", {})
+
+        print("🔎 evStatus keys:", list(ev_status.keys()))
 
         return jsonify({
-            "keys": list(vehicle_dict.keys()),
-            "sample_values": {k: str(vehicle_dict[k])[:100] for k in vehicle_dict if not k.startswith('_')}
+            "ev_status_raw": ev_status,
+            "keys": list(ev_status.keys()),
         }), 200
 
     except Exception as e:
+        import traceback
+        print(f"❌ Error in /debug_vehicle: {e}")
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
