@@ -313,8 +313,8 @@ def debug_vehicle():
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
-        # Fetch raw cached vehicle status directly from API
-        raw_status = vehicle_manager.get_cached_vehicle_status(vehicle)
+        # ✅ Manually call the private internal method from the raw API
+        raw_status = vehicle_manager.api.get_vehicle_status(vehicle_manager.token, vehicle)
         ev_status = raw_status.get("vehicleStatus", {}).get("evStatus", {})
 
         print("🔎 evStatus keys:", list(ev_status.keys()))
@@ -329,4 +329,3 @@ def debug_vehicle():
         print(f"❌ Error in /debug_vehicle: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
