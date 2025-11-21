@@ -51,8 +51,33 @@ def init_vehicle_manager():
     """Initialize vehicle manager lazily on first request."""
     global vehicle_manager, VEHICLE_ID
 
+    # If both are set, we're good
     if vehicle_manager is not None and VEHICLE_ID is not None:
         return True
+
+    # If vehicle_manager exists but VEHICLE_ID is None, we need to refresh vehicles
+    if vehicle_manager is not None and VEHICLE_ID is None:
+        logger.info("Vehicle manager exists but no VEHICLE_ID set. Refreshing vehicles...")
+        try:
+            vehicle_manager.update_all_vehicles_with_cached_state()
+            logger.info(f"Refreshed vehicles. Found {len(vehicle_manager.vehicles)} vehicle(s).")
+
+            if not vehicle_manager.vehicles:
+                logger.warning("Still no vehicles after refresh. Trying force refresh...")
+                vehicle_manager.force_refresh_all_vehicles_states()
+                logger.info(f"After force refresh: Found {len(vehicle_manager.vehicles)} vehicle(s).")
+
+            # Try to set VEHICLE_ID again
+            if vehicle_manager.vehicles:
+                VEHICLE_ID = next(iter(vehicle_manager.vehicles.keys()))
+                logger.info(f"Auto-detected vehicle: {VEHICLE_ID}")
+                return True
+            else:
+                logger.error("No vehicles found even after force refresh.")
+                return False
+        except Exception as e:
+            logger.error(f"Error refreshing vehicles: {e}", exc_info=True)
+            return False
 
     try:
         if USERNAME is None or PASSWORD is None or PIN is None:
@@ -106,6 +131,9 @@ def init_vehicle_manager():
                 try:
                     vehicle_manager.force_refresh_all_vehicles_states()
                     logger.info(f"After force refresh: Found {len(vehicle_manager.vehicles)} vehicle(s).")
+                    if vehicle_manager.vehicles:
+                        for vid, vehicle in vehicle_manager.vehicles.items():
+                            logger.info(f"Vehicle found after force - ID: {vid}, Name: {vehicle.name}, Model: {vehicle.model}")
                 except Exception as refresh_error:
                     logger.error(f"Force refresh failed: {refresh_error}")
 
