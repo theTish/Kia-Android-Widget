@@ -31,9 +31,9 @@ logger = logging.getLogger(__name__)
 # ── Environment Variables ──
 USERNAME = os.environ.get('KIA_USERNAME')
 PASSWORD = os.environ.get('KIA_PASSWORD')
-PIN = os.environ.get('KIA_PIN')
+PIN = os.environ.get('KIA_PIN')  # Keep as string to preserve leading zeros
 SECRET_KEY = os.environ.get("SECRET_KEY")
-BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH", DEFAULT_BATTERY_CAPACITY_KWH))
+BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH") or DEFAULT_BATTERY_CAPACITY_KWH)
 
 if USERNAME is None or PASSWORD is None or PIN is None:
     raise ValueError("Missing credentials! Check KIA_USERNAME, KIA_PASSWORD, and KIA_PIN environment variables.")
@@ -41,13 +41,16 @@ if USERNAME is None or PASSWORD is None or PIN is None:
 if not SECRET_KEY:
     raise ValueError("Missing SECRET_KEY environment variable.")
 
+# Debug: Log PIN length (not the actual PIN for security)
+logger.info(f"KIA_PIN length: {len(PIN)} characters")
+
 # ── Initialize Vehicle Manager ──
 vehicle_manager = VehicleManager(
     region=REGION_NORTH_AMERICA,
     brand=BRAND_KIA,
     username=USERNAME,
     password=PASSWORD,
-    pin=str(PIN)
+    pin=PIN  # Already a string from environment
 )
 
 # ── Authenticate and Initialize ──
