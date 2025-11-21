@@ -30,7 +30,7 @@ USERNAME = os.environ.get('KIA_USERNAME')
 PASSWORD = os.environ.get('KIA_PASSWORD')
 PIN = os.environ.get('KIA_PIN')
 SECRET_KEY = os.environ.get("SECRET_KEY")
-BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH", DEFAULT_BATTERY_CAPACITY_KWH))
+BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH") or DEFAULT_BATTERY_CAPACITY_KWH)
 
 # ── Global state ──
 vehicle_manager = None
