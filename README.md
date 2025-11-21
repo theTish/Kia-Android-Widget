@@ -28,18 +28,20 @@ In your project, set up the following environment variables:
 - `KIA_PASSWORD`: Your Kia password.
 - `KIA_PIN`: Your Kia PIN.
 - `SECRET_KEY`: Your Secret Key (this is a custom password you create. Add whatever value you'd like)
-- `VEHICLE_ID`: Your Vehicle ID (needed if you have more than one vehicle tied to your account)
+- `VEHICLE_ID`: Your Vehicle ID (optional - needed if you have more than one vehicle tied to your account)
+- `BATTERY_CAPACITY_KWH`: Your vehicle's battery capacity in kWh (optional - defaults to 77.4 kWh for EV6/EV9)
 
 ### 3. Deploy on Vercel
 Once the repo is on GitHub, follow these steps to deploy it on Vercel:
 1. Go to [Vercel](https://vercel.com/) and log in with your GitHub account.
 2. Click on **New Project** and choose your repository.
-3. Set up your environment variables in Vercel’s dashboard:
+3. Set up your environment variables in Vercel's dashboard:
     - `KIA_USERNAME`: (value)
     - `KIA_PASSWORD`: (value)
     - `KIA_PIN`: (value)
     - `SECRET_KEY`: (value) (your own custom password for more security)
-    - `VEHICLE_ID`: (value)
+    - `VEHICLE_ID`: (value) (optional)
+    - `BATTERY_CAPACITY_KWH`: (value) (optional, e.g., 77.4)
 
 ### 4. Deploy the project.
 
@@ -73,6 +75,28 @@ You can create an iOS Shortcut to interact with your Kia Vehicle Control API eas
     8. Tap Done to save the shortcut.
     9. Run the Shortcut: When you run the shortcut, it will send a request to your API, performing the action you configured (e.g., starting the climate control or unlocking the car).
 
+## API Endpoints
+
+- `GET /` - Welcome message
+- `GET /health` - Health check endpoint (no auth required)
+- `GET /list_vehicles` - List all vehicles
+- `POST /status` - Get vehicle status (battery, charging, doors, etc.)
+- `GET /lock_status` - Get lock status
+- `POST /lock_car` - Lock the vehicle
+- `POST /unlock_car` - Unlock the vehicle
+- `POST /start_climate` - Start climate control
+- `POST /stop_climate` - Stop climate control
+- `POST /debug_vehicle` - Debug endpoint for raw vehicle data
+
+## Features
+
+- **Rate Limiting**: 60 requests per minute per IP address
+- **Caching**: Vehicle state cached for 30 seconds to reduce API calls
+- **Input Validation**: All inputs are validated to prevent errors
+- **Proper Logging**: Structured logging for better debugging
+- **Health Check**: Monitor API availability with `/health` endpoint
+- **Token Refresh**: Automatic token refresh on each request
+
 ## Notes
 
 The API requires your **region**. By default, it is set to the USA. If you are outside the US, update it using the following region codes:
@@ -86,7 +110,13 @@ REGIONS = {
 
 
 
-The climate command requires a Climate Request Option. By default, it is set to 72°F for 10 minutes, but you can modify this based on your preferences.
+The climate command requires a Climate Request Option. By default, it is set to 21°C for 10 minutes, but you can modify this based on your preferences.
+
+**Input Validation for /start_climate:**
+- Temperature: 16-30°C
+- Duration: 5-30 minutes
+- Seat heating levels: 0-3
+- Steering wheel heating: 0-3
 
 ---
 
