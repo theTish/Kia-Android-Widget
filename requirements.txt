@@ -1,3 +1,4 @@
-Flask
-hyundai-kia-connect-api
-requests
+Flask>=3.0.0
+hyundai-kia-connect-api>=3.32.0
+requests>=2.31.0
+tzdata>=2023.3
