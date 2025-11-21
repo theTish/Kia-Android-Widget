@@ -51,63 +51,23 @@ def init_vehicle_manager():
     """Initialize vehicle manager lazily on first request."""
     global vehicle_manager, VEHICLE_ID
 
-    # If both are set, we're good
+    # If already initialized, return success
     if vehicle_manager is not None and VEHICLE_ID is not None:
         return True
 
-    # If vehicle_manager exists but VEHICLE_ID is None, we need to refresh vehicles
-    if vehicle_manager is not None and VEHICLE_ID is None:
-        logger.info("Vehicle manager exists but no VEHICLE_ID set. Refreshing vehicles...")
-        try:
-            vehicle_manager.update_all_vehicles_with_cached_state()
-            logger.info(f"Refreshed vehicles. Found {len(vehicle_manager.vehicles)} vehicle(s).")
+    # Check credentials first
+    if USERNAME is None or PASSWORD is None or PIN is None:
+        logger.error("Missing credentials! Check KIA_USERNAME, KIA_PASSWORD, and KIA_PIN environment variables.")
+        return False
 
-            if not vehicle_manager.vehicles:
-                logger.warning("Still no vehicles after refresh. Trying force refresh...")
-                vehicle_manager.force_refresh_all_vehicles_states()
-                logger.info(f"After force refresh: Found {len(vehicle_manager.vehicles)} vehicle(s).")
-
-            # If still no vehicles, try calling get_vehicles directly
-            if not vehicle_manager.vehicles:
-                logger.warning("Still no vehicles after force refresh. Trying get_vehicles() directly...")
-                try:
-                    raw_vehicles = vehicle_manager.api.get_vehicles(vehicle_manager.token)
-                    logger.info(f"Raw vehicles response type: {type(raw_vehicles)}")
-                    logger.info(f"Raw vehicles response: {raw_vehicles}")
-
-                    # Check if it's a list
-                    if isinstance(raw_vehicles, list):
-                        logger.info(f"Got list with {len(raw_vehicles)} items")
-                        for idx, item in enumerate(raw_vehicles):
-                            logger.info(f"Item {idx}: {type(item)} - {item}")
-                except Exception as get_error:
-                    logger.error(f"Error calling get_vehicles: {get_error}", exc_info=True)
-
-            # Try to set VEHICLE_ID again
-            if vehicle_manager.vehicles:
-                VEHICLE_ID = next(iter(vehicle_manager.vehicles.keys()))
-                logger.info(f"Auto-detected vehicle: {VEHICLE_ID}")
-                return True
-            else:
-                logger.error("No vehicles found even after all attempts.")
-                return False
-        except Exception as e:
-            logger.error(f"Error refreshing vehicles: {e}", exc_info=True)
-            return False
+    if not SECRET_KEY:
+        logger.error("Missing SECRET_KEY environment variable.")
+        return False
 
     try:
-        if USERNAME is None or PASSWORD is None or PIN is None:
-            logger.error("Missing credentials! Check KIA_USERNAME, KIA_PASSWORD, and KIA_PIN environment variables.")
-            return False
-
-        if not SECRET_KEY:
-            logger.error("Missing SECRET_KEY environment variable.")
-            return False
-
         # Initialize vehicle manager if not already done
         if vehicle_manager is None:
             from hyundai_kia_connect_api import VehicleManager
-            from hyundai_kia_connect_api.exceptions import AuthenticationError
 
             logger.info(f"Initializing Vehicle Manager (Region: {REGION}, Brand: {BRAND_KIA})...")
             logger.info(f"Using PIN with length: {len(PIN)} characters")
@@ -125,48 +85,24 @@ def init_vehicle_manager():
                 vehicle_manager.check_and_refresh_token()
                 logger.info("Token refreshed successfully.")
             except Exception as auth_error:
-                logger.error(f"Authentication failed: {auth_error}")
-                # Try to get more details about the error
-                if hasattr(auth_error, 'response'):
-                    logger.error(f"Response status: {auth_error.response.status_code if hasattr(auth_error.response, 'status_code') else 'N/A'}")
-                    logger.error(f"Response text (first 500 chars): {str(auth_error.response.text)[:500] if hasattr(auth_error.response, 'text') else 'N/A'}")
+                logger.error(f"Authentication failed: {auth_error}", exc_info=True)
+                # Try to capture more details about what the API returned
+                import traceback
+                logger.error(f"Full traceback: {traceback.format_exc()}")
                 raise
 
-            logger.info("Updating vehicle states...")
+            # IMPORTANT: Only call vehicle update ONCE - per user's insight about not calling it multiple times
+            logger.info("Fetching vehicles (calling only once)...")
             vehicle_manager.update_all_vehicles_with_cached_state()
-            logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
+            logger.info(f"Found {len(vehicle_manager.vehicles)} vehicle(s).")
 
-            # Debug: Check if we need to call get_vehicles directly
-            if not vehicle_manager.vehicles:
-                logger.warning("No vehicles after update_all_vehicles_with_cached_state")
-                logger.info("Attempting to get vehicles using get_vehicles()...")
-                try:
-                    # Try calling the API's get_vehicles method directly
-                    raw_vehicles = vehicle_manager.api.get_vehicles(vehicle_manager.token)
-                    logger.info(f"Raw vehicles response: {raw_vehicles}")
-
-                    # Manually update the vehicles dict
-                    if raw_vehicles and hasattr(raw_vehicles, 'vehicles'):
-                        logger.info(f"Found vehicles in raw response: {len(raw_vehicles.vehicles)}")
-                except Exception as get_error:
-                    logger.error(f"Error calling get_vehicles: {get_error}", exc_info=True)
-
-            # Debug: Log vehicle details
+            # Log vehicle details if found
             if vehicle_manager.vehicles:
                 for vid, vehicle in vehicle_manager.vehicles.items():
-                    logger.info(f"Vehicle found - ID: {vid}, Name: {vehicle.name}, Model: {vehicle.model}")
+                    logger.info(f"Vehicle - ID: {vid}, Name: {vehicle.name}, Model: {vehicle.model}")
             else:
-                logger.warning("No vehicles in vehicle_manager.vehicles dict")
-                # Try to force update
-                logger.info("Attempting force update of vehicles...")
-                try:
-                    vehicle_manager.force_refresh_all_vehicles_states()
-                    logger.info(f"After force refresh: Found {len(vehicle_manager.vehicles)} vehicle(s).")
-                    if vehicle_manager.vehicles:
-                        for vid, vehicle in vehicle_manager.vehicles.items():
-                            logger.info(f"Vehicle found after force - ID: {vid}, Name: {vehicle.name}, Model: {vehicle.model}")
-                except Exception as refresh_error:
-                    logger.error(f"Force refresh failed: {refresh_error}")
+                logger.error("No vehicles found in the account after single fetch attempt.")
+                return False
 
         # Set VEHICLE_ID if not already set
         if VEHICLE_ID is None:
