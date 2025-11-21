@@ -67,13 +67,29 @@ def init_vehicle_manager():
                 vehicle_manager.force_refresh_all_vehicles_states()
                 logger.info(f"After force refresh: Found {len(vehicle_manager.vehicles)} vehicle(s).")
 
+            # If still no vehicles, try calling get_vehicles directly
+            if not vehicle_manager.vehicles:
+                logger.warning("Still no vehicles after force refresh. Trying get_vehicles() directly...")
+                try:
+                    raw_vehicles = vehicle_manager.api.get_vehicles(vehicle_manager.token)
+                    logger.info(f"Raw vehicles response type: {type(raw_vehicles)}")
+                    logger.info(f"Raw vehicles response: {raw_vehicles}")
+
+                    # Check if it's a list
+                    if isinstance(raw_vehicles, list):
+                        logger.info(f"Got list with {len(raw_vehicles)} items")
+                        for idx, item in enumerate(raw_vehicles):
+                            logger.info(f"Item {idx}: {type(item)} - {item}")
+                except Exception as get_error:
+                    logger.error(f"Error calling get_vehicles: {get_error}", exc_info=True)
+
             # Try to set VEHICLE_ID again
             if vehicle_manager.vehicles:
                 VEHICLE_ID = next(iter(vehicle_manager.vehicles.keys()))
                 logger.info(f"Auto-detected vehicle: {VEHICLE_ID}")
                 return True
             else:
-                logger.error("No vehicles found even after force refresh.")
+                logger.error("No vehicles found even after all attempts.")
                 return False
         except Exception as e:
             logger.error(f"Error refreshing vehicles: {e}", exc_info=True)
