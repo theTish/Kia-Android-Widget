@@ -29,10 +29,14 @@ logger = logging.getLogger(__name__)
 # ── Environment Variables ──
 USERNAME = os.environ.get('KIA_USERNAME')
 PASSWORD = os.environ.get('KIA_PASSWORD')
-PIN = os.environ.get('KIA_PIN')
+PIN = os.environ.get('KIA_PIN')  # Keep as string to preserve leading zeros
 SECRET_KEY = os.environ.get("SECRET_KEY")
 BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH") or DEFAULT_BATTERY_CAPACITY_KWH)
 REGION = int(os.environ.get("KIA_REGION") or DEFAULT_REGION)
+
+# Debug: Log PIN length (not the actual PIN for security)
+if PIN:
+    logger.info(f"KIA_PIN length: {len(PIN)} characters")
 
 # ── Global state ──
 vehicle_manager = None
@@ -65,12 +69,14 @@ def init_vehicle_manager():
             from hyundai_kia_connect_api.exceptions import AuthenticationError
 
             logger.info(f"Initializing Vehicle Manager (Region: {REGION}, Brand: {BRAND_KIA})...")
+            logger.info(f"Using PIN with length: {len(PIN)} characters")
+
             vehicle_manager = VehicleManager(
                 region=REGION,
                 brand=BRAND_KIA,
                 username=USERNAME,
                 password=PASSWORD,
-                pin=str(PIN)
+                pin=PIN  # PIN is already a string from environment
             )
 
             logger.info("Attempting to authenticate and refresh token...")
@@ -231,8 +237,16 @@ def diagnostics():
     credential_warnings = []
     if USERNAME and ('@' not in USERNAME):
         credential_warnings.append("KIA_USERNAME should be an email address")
-    if PIN and (len(str(PIN)) != 4):
-        credential_warnings.append(f"KIA_PIN should be 4 digits, got length: {len(str(PIN))}")
+
+    pin_length = len(PIN) if PIN else 0
+    if PIN and pin_length != 4:
+        credential_warnings.append(f"KIA_PIN should be 4 digits, got length: {pin_length}")
+
+    # Add info about PIN length to help debug
+    pin_info = {
+        "length": pin_length,
+        "starts_with_zero": PIN.startswith('0') if PIN else False
+    }
 
     return jsonify({
         "env_vars_set": {
@@ -250,6 +264,7 @@ def diagnostics():
             "battery_capacity_kwh": BATTERY_CAPACITY_KWH,
             "brand": BRAND_KIA
         },
+        "pin_info": pin_info,
         "global_state": {
             "vehicle_manager_initialized": vehicle_manager is not None,
             "vehicle_id_set": VEHICLE_ID is not None,
