@@ -45,7 +45,7 @@ def init_vehicle_manager():
     """Initialize vehicle manager lazily on first request."""
     global vehicle_manager, VEHICLE_ID
 
-    if vehicle_manager is not None:
+    if vehicle_manager is not None and VEHICLE_ID is not None:
         return True
 
     try:
@@ -57,36 +57,40 @@ def init_vehicle_manager():
             logger.error("Missing SECRET_KEY environment variable.")
             return False
 
-        from hyundai_kia_connect_api import VehicleManager
-        from hyundai_kia_connect_api.exceptions import AuthenticationError
+        # Initialize vehicle manager if not already done
+        if vehicle_manager is None:
+            from hyundai_kia_connect_api import VehicleManager
+            from hyundai_kia_connect_api.exceptions import AuthenticationError
 
-        logger.info("Initializing Vehicle Manager...")
-        vehicle_manager = VehicleManager(
-            region=REGION_NORTH_AMERICA,
-            brand=BRAND_KIA,
-            username=USERNAME,
-            password=PASSWORD,
-            pin=str(PIN)
-        )
+            logger.info("Initializing Vehicle Manager...")
+            vehicle_manager = VehicleManager(
+                region=REGION_NORTH_AMERICA,
+                brand=BRAND_KIA,
+                username=USERNAME,
+                password=PASSWORD,
+                pin=str(PIN)
+            )
 
-        logger.info("Attempting to authenticate and refresh token...")
-        vehicle_manager.check_and_refresh_token()
-        logger.info("Token refreshed successfully.")
+            logger.info("Attempting to authenticate and refresh token...")
+            vehicle_manager.check_and_refresh_token()
+            logger.info("Token refreshed successfully.")
 
-        logger.info("Updating vehicle states...")
-        vehicle_manager.update_all_vehicles_with_cached_state()
-        logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
+            logger.info("Updating vehicle states...")
+            vehicle_manager.update_all_vehicles_with_cached_state()
+            logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
 
-        # Dynamically fetch VEHICLE_ID
-        VEHICLE_ID = os.environ.get("VEHICLE_ID") or None
-        if not VEHICLE_ID:
-            if not vehicle_manager.vehicles:
-                logger.error("No vehicles found in the account.")
-                return False
-            VEHICLE_ID = next(iter(vehicle_manager.vehicles.keys()))
-            logger.info(f"No VEHICLE_ID provided. Using the first vehicle found: {VEHICLE_ID}")
-        else:
-            logger.info(f"Using VEHICLE_ID from environment: {VEHICLE_ID}")
+        # Set VEHICLE_ID if not already set
+        if VEHICLE_ID is None:
+            env_vehicle_id = os.environ.get("VEHICLE_ID", "").strip()
+            if env_vehicle_id:
+                VEHICLE_ID = env_vehicle_id
+                logger.info(f"Using VEHICLE_ID from environment: {VEHICLE_ID}")
+            else:
+                if not vehicle_manager.vehicles:
+                    logger.error("No vehicles found in the account.")
+                    return False
+                VEHICLE_ID = next(iter(vehicle_manager.vehicles.keys()))
+                logger.info(f"No VEHICLE_ID provided. Auto-detected first vehicle: {VEHICLE_ID}")
 
         return True
     except Exception as e:
