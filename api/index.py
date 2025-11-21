@@ -120,6 +120,21 @@ def init_vehicle_manager():
             vehicle_manager.update_all_vehicles_with_cached_state()
             logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
 
+            # Debug: Check if we need to call get_vehicles directly
+            if not vehicle_manager.vehicles:
+                logger.warning("No vehicles after update_all_vehicles_with_cached_state")
+                logger.info("Attempting to get vehicles using get_vehicles()...")
+                try:
+                    # Try calling the API's get_vehicles method directly
+                    raw_vehicles = vehicle_manager.api.get_vehicles(vehicle_manager.token)
+                    logger.info(f"Raw vehicles response: {raw_vehicles}")
+
+                    # Manually update the vehicles dict
+                    if raw_vehicles and hasattr(raw_vehicles, 'vehicles'):
+                        logger.info(f"Found vehicles in raw response: {len(raw_vehicles.vehicles)}")
+                except Exception as get_error:
+                    logger.error(f"Error calling get_vehicles: {get_error}", exc_info=True)
+
             # Debug: Log vehicle details
             if vehicle_manager.vehicles:
                 for vid, vehicle in vehicle_manager.vehicles.items():
