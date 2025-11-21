@@ -1,4 +1,4 @@
 Flask>=3.0.0
-hyundai-kia-connect-api==3.49.3
+hyundai-kia-connect-api==3.42.2
 requests>=2.31.0
 tzdata>=2023.3
