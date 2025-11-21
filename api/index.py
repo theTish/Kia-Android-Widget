@@ -74,8 +74,16 @@ def init_vehicle_manager():
             )
 
             logger.info("Attempting to authenticate and refresh token...")
-            vehicle_manager.check_and_refresh_token()
-            logger.info("Token refreshed successfully.")
+            try:
+                vehicle_manager.check_and_refresh_token()
+                logger.info("Token refreshed successfully.")
+            except Exception as auth_error:
+                logger.error(f"Authentication failed: {auth_error}")
+                # Try to get more details about the error
+                if hasattr(auth_error, 'response'):
+                    logger.error(f"Response status: {auth_error.response.status_code if hasattr(auth_error.response, 'status_code') else 'N/A'}")
+                    logger.error(f"Response text (first 500 chars): {str(auth_error.response.text)[:500] if hasattr(auth_error.response, 'text') else 'N/A'}")
+                raise
 
             logger.info("Updating vehicle states...")
             vehicle_manager.update_all_vehicles_with_cached_state()
@@ -218,6 +226,14 @@ def root():
 def diagnostics():
     """Diagnostic endpoint to check environment configuration (no auth required)."""
     region_names = {1: "Europe", 2: "Canada", 3: "USA", 4: "China", 5: "Australia"}
+
+    # Check credential format issues
+    credential_warnings = []
+    if USERNAME and ('@' not in USERNAME):
+        credential_warnings.append("KIA_USERNAME should be an email address")
+    if PIN and (len(str(PIN)) != 4):
+        credential_warnings.append(f"KIA_PIN should be 4 digits, got length: {len(str(PIN))}")
+
     return jsonify({
         "env_vars_set": {
             "KIA_USERNAME": USERNAME is not None and USERNAME != "",
@@ -238,7 +254,8 @@ def diagnostics():
             "vehicle_manager_initialized": vehicle_manager is not None,
             "vehicle_id_set": VEHICLE_ID is not None,
             "vehicle_id_value": VEHICLE_ID if VEHICLE_ID else None
-        }
+        },
+        "warnings": credential_warnings if credential_warnings else None
     }), 200
 
 # ── List Vehicles Endpoint ──
