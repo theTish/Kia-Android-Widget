@@ -78,13 +78,15 @@ def init_vehicle_manager():
         logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
 
         # Dynamically fetch VEHICLE_ID
-        VEHICLE_ID = os.environ.get("VEHICLE_ID")
+        VEHICLE_ID = os.environ.get("VEHICLE_ID") or None
         if not VEHICLE_ID:
             if not vehicle_manager.vehicles:
                 logger.error("No vehicles found in the account.")
                 return False
             VEHICLE_ID = next(iter(vehicle_manager.vehicles.keys()))
             logger.info(f"No VEHICLE_ID provided. Using the first vehicle found: {VEHICLE_ID}")
+        else:
+            logger.info(f"Using VEHICLE_ID from environment: {VEHICLE_ID}")
 
         return True
     except Exception as e:
@@ -96,12 +98,17 @@ def get_cached_vehicle_state():
     if vehicle_manager is None:
         raise RuntimeError("Vehicle manager not initialized")
 
+    if VEHICLE_ID is None:
+        raise RuntimeError("VEHICLE_ID not set")
+
     now = datetime.now()
     if (vehicle_state_cache["last_update"] is None or
         (now - vehicle_state_cache["last_update"]).total_seconds() > CACHE_TTL_SECONDS):
         logger.info("Cache expired or empty, refreshing vehicle states...")
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle_state_cache["last_update"] = now
+
+    logger.info(f"Getting vehicle with ID: {VEHICLE_ID}")
     return vehicle_manager.get_vehicle(VEHICLE_ID)
 
 def check_rate_limit(client_id: str, max_requests: int = MAX_REQUESTS_PER_MINUTE) -> bool:
