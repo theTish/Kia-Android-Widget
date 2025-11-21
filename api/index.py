@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
 
 # ── Constants ──
-REGION_NORTH_AMERICA = 2
+# Region codes: 1=Europe, 2=Canada, 3=USA, 4=China, 5=Australia
+DEFAULT_REGION = 3  # USA (was 2=Canada)
 BRAND_KIA = 1
 DEFAULT_BATTERY_CAPACITY_KWH = 77.4
 CACHE_TTL_SECONDS = 30
@@ -31,6 +32,7 @@ PASSWORD = os.environ.get('KIA_PASSWORD')
 PIN = os.environ.get('KIA_PIN')
 SECRET_KEY = os.environ.get("SECRET_KEY")
 BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH") or DEFAULT_BATTERY_CAPACITY_KWH)
+REGION = int(os.environ.get("KIA_REGION") or DEFAULT_REGION)
 
 # ── Global state ──
 vehicle_manager = None
@@ -62,9 +64,9 @@ def init_vehicle_manager():
             from hyundai_kia_connect_api import VehicleManager
             from hyundai_kia_connect_api.exceptions import AuthenticationError
 
-            logger.info("Initializing Vehicle Manager...")
+            logger.info(f"Initializing Vehicle Manager (Region: {REGION}, Brand: {BRAND_KIA})...")
             vehicle_manager = VehicleManager(
-                region=REGION_NORTH_AMERICA,
+                region=REGION,
                 brand=BRAND_KIA,
                 username=USERNAME,
                 password=PASSWORD,
@@ -78,6 +80,20 @@ def init_vehicle_manager():
             logger.info("Updating vehicle states...")
             vehicle_manager.update_all_vehicles_with_cached_state()
             logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
+
+            # Debug: Log vehicle details
+            if vehicle_manager.vehicles:
+                for vid, vehicle in vehicle_manager.vehicles.items():
+                    logger.info(f"Vehicle found - ID: {vid}, Name: {vehicle.name}, Model: {vehicle.model}")
+            else:
+                logger.warning("No vehicles in vehicle_manager.vehicles dict")
+                # Try to force update
+                logger.info("Attempting force update of vehicles...")
+                try:
+                    vehicle_manager.force_refresh_all_vehicles_states()
+                    logger.info(f"After force refresh: Found {len(vehicle_manager.vehicles)} vehicle(s).")
+                except Exception as refresh_error:
+                    logger.error(f"Force refresh failed: {refresh_error}")
 
         # Set VEHICLE_ID if not already set
         if VEHICLE_ID is None:
@@ -201,6 +217,7 @@ def root():
 @app.route('/diagnostics', methods=['GET'])
 def diagnostics():
     """Diagnostic endpoint to check environment configuration (no auth required)."""
+    region_names = {1: "Europe", 2: "Canada", 3: "USA", 4: "China", 5: "Australia"}
     return jsonify({
         "env_vars_set": {
             "KIA_USERNAME": USERNAME is not None and USERNAME != "",
@@ -208,7 +225,14 @@ def diagnostics():
             "KIA_PIN": PIN is not None and PIN != "",
             "SECRET_KEY": SECRET_KEY is not None and SECRET_KEY != "",
             "VEHICLE_ID": os.environ.get("VEHICLE_ID", "") != "",
-            "BATTERY_CAPACITY_KWH": os.environ.get("BATTERY_CAPACITY_KWH", "") != ""
+            "BATTERY_CAPACITY_KWH": os.environ.get("BATTERY_CAPACITY_KWH", "") != "",
+            "KIA_REGION": os.environ.get("KIA_REGION", "") != ""
+        },
+        "configuration": {
+            "region_code": REGION,
+            "region_name": region_names.get(REGION, "Unknown"),
+            "battery_capacity_kwh": BATTERY_CAPACITY_KWH,
+            "brand": BRAND_KIA
         },
         "global_state": {
             "vehicle_manager_initialized": vehicle_manager is not None,
