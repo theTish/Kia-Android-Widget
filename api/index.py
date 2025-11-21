@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify
 
 # ── Constants ──
 # Region codes: 1=Europe, 2=Canada, 3=USA, 4=China, 5=Australia
-DEFAULT_REGION = 3  # USA (was 2=Canada)
+DEFAULT_REGION = 2  # Canada
 BRAND_KIA = 1
 DEFAULT_BATTERY_CAPACITY_KWH = 77.4
 CACHE_TTL_SECONDS = 30
