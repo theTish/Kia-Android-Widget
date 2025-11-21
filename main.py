@@ -1,90 +1,182 @@
 
 import os
+import logging
+from functools import wraps
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
 from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
 from hyundai_kia_connect_api.exceptions import AuthenticationError
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
+# ── Constants ──
+REGION_NORTH_AMERICA = 2
+BRAND_KIA = 1
+DEFAULT_BATTERY_CAPACITY_KWH = 77.4
+CACHE_TTL_SECONDS = 30
+MAX_REQUESTS_PER_MINUTE = 60
+
+# ── Flask App Setup ──
 app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", os.urandom(24).hex())
+app.config['JSON_SORT_KEYS'] = False
 
-# Get credentials from environment variables
+# ── Logging Configuration ──
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+# ── Environment Variables ──
 USERNAME = os.environ.get('KIA_USERNAME')
 PASSWORD = os.environ.get('KIA_PASSWORD')
 PIN = os.environ.get('KIA_PIN')
+SECRET_KEY = os.environ.get("SECRET_KEY")
+BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH", DEFAULT_BATTERY_CAPACITY_KWH))
 
 if USERNAME is None or PASSWORD is None or PIN is None:
-    raise ValueError("Missing credentials! Check your environment variables.")
+    raise ValueError("Missing credentials! Check KIA_USERNAME, KIA_PASSWORD, and KIA_PIN environment variables.")
 
-# Initialize Vehicle Manager
+if not SECRET_KEY:
+    raise ValueError("Missing SECRET_KEY environment variable.")
+
+# ── Initialize Vehicle Manager ──
 vehicle_manager = VehicleManager(
-    region=2,  # North America region
-    brand=1,   # KIA brand
+    region=REGION_NORTH_AMERICA,
+    brand=BRAND_KIA,
     username=USERNAME,
     password=PASSWORD,
     pin=str(PIN)
 )
 
-# Refresh the token and update vehicle states
+# ── Authenticate and Initialize ──
 try:
-    print("Attempting to authenticate and refresh token...")
+    logger.info("Attempting to authenticate and refresh token...")
     vehicle_manager.check_and_refresh_token()
-    print("Token refreshed successfully.")
-    print("Updating vehicle states...")
+    logger.info("Token refreshed successfully.")
+    logger.info("Updating vehicle states...")
     vehicle_manager.update_all_vehicles_with_cached_state()
-    print(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
+    logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
 except AuthenticationError as e:
-    print(f"Failed to authenticate: {e}")
+    logger.error(f"Failed to authenticate: {e}")
     exit(1)
 except Exception as e:
-    print(f"Unexpected error during initialization: {e}")
+    logger.error(f"Unexpected error during initialization: {e}")
     exit(1)
 
-# Secret key for security - moved to environment variables
-SECRET_KEY = os.environ.get("SECRET_KEY")
-if not SECRET_KEY:
-    raise ValueError("Missing SECRET_KEY environment variable.")
-
-# Dynamically fetch the first vehicle ID if VEHICLE_ID is not set
+# ── Dynamically fetch VEHICLE_ID ──
 VEHICLE_ID = os.environ.get("VEHICLE_ID")
 if not VEHICLE_ID:
     if not vehicle_manager.vehicles:
         raise ValueError("No vehicles found in the account. Please ensure your Kia account has at least one vehicle.")
-    # Fetch the first vehicle ID
     VEHICLE_ID = next(iter(vehicle_manager.vehicles.keys()))
-    print(f"No VEHICLE_ID provided. Using the first vehicle found: {VEHICLE_ID}")
+    logger.info(f"No VEHICLE_ID provided. Using the first vehicle found: {VEHICLE_ID}")
 
-# Log incoming requests
+# ── Cache Management ──
+vehicle_state_cache = {
+    "last_update": None,
+    "data": None
+}
+
+def get_cached_vehicle_state():
+    """Get vehicle state with caching."""
+    now = datetime.now()
+    if (vehicle_state_cache["last_update"] is None or
+        (now - vehicle_state_cache["last_update"]).total_seconds() > CACHE_TTL_SECONDS):
+        logger.info("Cache expired or empty, refreshing vehicle states...")
+        vehicle_manager.update_all_vehicles_with_cached_state()
+        vehicle_state_cache["last_update"] = now
+    return vehicle_manager.get_vehicle(VEHICLE_ID)
+
+# ── Rate Limiting (Simple implementation) ──
+rate_limit_store = {}
+
+def check_rate_limit(client_id: str, max_requests: int = MAX_REQUESTS_PER_MINUTE) -> bool:
+    """Simple rate limiting check."""
+    now = datetime.now()
+    minute_ago = now - timedelta(minutes=1)
+
+    # Clean old entries
+    rate_limit_store[client_id] = [
+        ts for ts in rate_limit_store.get(client_id, []) if ts > minute_ago
+    ]
+
+    # Check limit
+    if len(rate_limit_store.get(client_id, [])) >= max_requests:
+        return False
+
+    # Add current request
+    if client_id not in rate_limit_store:
+        rate_limit_store[client_id] = []
+    rate_limit_store[client_id].append(now)
+
+    return True
+
+# ── Token Refresh Helper ──
+def refresh_token_if_needed():
+    """Refresh token if needed."""
+    try:
+        vehicle_manager.check_and_refresh_token()
+    except Exception as e:
+        logger.warning(f"Token refresh check failed: {e}")
+
+# ── Authorization Decorator ──
+def require_auth(f):
+    """Decorator to require authorization header."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get("Authorization")
+        if auth_header != SECRET_KEY:
+            logger.warning(f"Unauthorized request to {request.path} from {request.remote_addr}")
+            return jsonify({"error": "Unauthorized"}), 403
+
+        # Rate limiting
+        client_id = request.remote_addr
+        if not check_rate_limit(client_id):
+            logger.warning(f"Rate limit exceeded for {client_id}")
+            return jsonify({"error": "Rate limit exceeded. Please try again later."}), 429
+
+        return f(*args, **kwargs)
+    return decorated
+
+# ── Request Logging ──
 @app.before_request
 def log_request_info():
-    print(f"Incoming request: {request.method} {request.url}")
+    logger.info(f"Incoming request: {request.method} {request.url} from {request.remote_addr}")
 
-# Root endpoint
+# ── Health Check Endpoint ──
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint for monitoring."""
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now(ZoneInfo("America/Toronto")).isoformat(),
+        "vehicles_count": len(vehicle_manager.vehicles)
+    }), 200
+
+# ── Root Endpoint ──
 @app.route('/', methods=['GET'])
 def root():
+    """Root endpoint."""
     return jsonify({"status": "Welcome to the Kia Vehicle Control API"}), 200
 
-# List vehicles endpoint
+# ── List Vehicles Endpoint ──
 @app.route('/list_vehicles', methods=['GET'])
+@require_auth
 def list_vehicles():
-    print("Received request to /list_vehicles")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request: Missing or incorrect Authorization header")
-        return jsonify({"error": "Unauthorized"}), 403
+    """List all vehicles in the account."""
+    logger.info("Received request to /list_vehicles")
 
     try:
-        print("Refreshing vehicle states...")
-        vehicle_manager.update_all_vehicles_with_cached_state()
-
+        refresh_token_if_needed()
+        vehicle = get_cached_vehicle_state()
         vehicles = vehicle_manager.vehicles
-        print(f"Vehicles data: {vehicles}")  # Log the vehicles data
 
         if not vehicles:
-            print("No vehicles found in the account")
+            logger.warning("No vehicles found in the account")
             return jsonify({"error": "No vehicles found"}), 404
 
-        # Iterate over the dictionary values (Vehicle objects)
         vehicle_list = [
             {
                 "name": v.name,
@@ -92,47 +184,45 @@ def list_vehicles():
                 "model": v.model,
                 "year": v.year
             }
-            for v in vehicles.values()  # Use .values() to get the Vehicle objects
+            for v in vehicles.values()
         ]
 
         if not vehicle_list:
-            print("No valid vehicles found in the account")
+            logger.warning("No valid vehicles found in the account")
             return jsonify({"error": "No valid vehicles found"}), 404
 
-        print(f"Returning vehicle list: {vehicle_list}")
+        logger.info(f"Returning vehicle list: {vehicle_list}")
         return jsonify({"status": "Success", "vehicles": vehicle_list}), 200
     except Exception as e:
-        print(f"Error in /list_vehicles: {e}")
+        logger.error(f"Error in /list_vehicles: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-#Vehicle Status Endpoint
+# ── Vehicle Status Endpoint ──
 @app.route('/status', methods=['POST'])
+@require_auth
 def vehicle_status():
-    print("Received request to /status")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        return jsonify({"error": "Unauthorized"}), 403
+    """Get current vehicle status."""
+    logger.info("Received request to /status")
 
     try:
-        # ── Refresh vehicle state ──
-        vehicle_manager.update_all_vehicles_with_cached_state()
-        vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
+        refresh_token_if_needed()
+        vehicle = get_cached_vehicle_state()
 
         # ── Grab raw charge limits from the API ──
         charge_limits = {}
         try:
             raw = vehicle_manager.api._get_charge_limits(vehicle_manager.token, vehicle)
             charge_limits = raw[0] if isinstance(raw, list) else raw
-            print("⚙️ Charge limits raw:", charge_limits)
+            logger.info(f"Charge limits raw: {charge_limits}")
         except Exception as e:
-            print(f"❌ Failed to get charge limits: {e}")
+            logger.error(f"Failed to get charge limits: {e}")
 
         # ── Determine plug type ──
         try:
             plug_type = int(vehicle.ev_battery_is_plugged_in)
         except (ValueError, TypeError):
             plug_type = 0
-        print(f"🔌 Plugged in raw: {vehicle.ev_battery_is_plugged_in} → {plug_type}")
+        logger.info(f"Plugged in raw: {vehicle.ev_battery_is_plugged_in} → {plug_type}")
 
         # ── Parse dynamic AC/DC limits (fallback to 100) ──
         try:
@@ -151,19 +241,18 @@ def vehicle_status():
             target_limit = ac_limit
         else:
             target_limit = ac_limit  # default if unplugged
-        print(f"🎯 Using target charge limit: {target_limit}%")
+        logger.info(f"Using target charge limit: {target_limit}%")
 
-        # ── Rest of your calculations ──
+        # ── Rest of calculations ──
         dur = vehicle.ev_estimated_current_charge_duration
         pct = vehicle.ev_battery_percentage
 
         # Estimated power (kW) from battery % math
         estimated_kw = None
         if plug_type in [1, 2] and dur > 0 and target_limit > pct:
-            battery_capacity_kwh = 77.4
             fraction = (target_limit - pct) / 100
-            estimated_kw = round((battery_capacity_kwh * fraction) / (dur / 60), 1)
-        print(f"⚡ Estimated power (calculated): {estimated_kw} kW")
+            estimated_kw = round((BATTERY_CAPACITY_KWH * fraction) / (dur / 60), 1)
+        logger.info(f"Estimated power (calculated): {estimated_kw} kW")
 
         # Actual power from current & voltage
         actual_kw = None
@@ -171,23 +260,23 @@ def vehicle_status():
             current = float(vehicle.ev_charging_current)
             voltage = float(vehicle.ev_charging_voltage)
             actual_kw = round((current * voltage) / 1000, 1)
-            print(f"⚡ Actual power (calculated): {actual_kw} kW")
+            logger.info(f"Actual power (calculated): {actual_kw} kW")
         except Exception as e:
-            print(f"❌ Couldn’t compute actual power: {e}")
+            logger.error(f"Couldn't compute actual power: {e}")
 
         # ── Pull raw values from evStatus (if available) ──
         try:
             raw_status = vehicle_manager.api._get_cached_vehicle_status(vehicle_manager.token, vehicle)
             ev_status = raw_status.get("vehicleStatus", {}).get("evStatus", {})
         except Exception as e:
-            print(f"❌ Could not fetch evStatus: {e}")
+            logger.error(f"Could not fetch evStatus: {e}")
             ev_status = {}
-        
+
         api_charging_power = ev_status.get("chargingPower")
         api_estimated_power = ev_status.get("estimatedChargingPow")
-        
-        print(f"⚙️ API chargingPower: {api_charging_power}, estimatedChargingPow: {api_estimated_power}")
-        
+
+        logger.info(f"API chargingPower: {api_charging_power}, estimatedChargingPow: {api_estimated_power}")
+
         # Fallback logic if actual_kw is missing
         actual_kw = actual_kw or api_charging_power
         estimated_kw = estimated_kw or api_estimated_power
@@ -228,156 +317,170 @@ def vehicle_status():
         return jsonify(resp), 200
 
     except Exception as e:
-        import traceback
-        print(f"❌ Error in /status: {e}")
-        traceback.print_exc()
+        logger.error(f"Error in /status: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-# Unlock car endpoint
-@app.route('/unlock_car', methods=['POST'])
-def unlock_car():
-    print("Received request to /unlock_car")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request: Missing or incorrect Authorization header")
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        print("Refreshing vehicle states...")
-        vehicle_manager.update_all_vehicles_with_cached_state()
-
-        # Unlock the vehicle using the VehicleManager's unlock method
-        result = vehicle_manager.unlock(VEHICLE_ID)
-        print(f"Unlock result: {result}")
-
-        return jsonify({"status": "Car unlocked", "result": result}), 200
-    except Exception as e:
-        print(f"Error in /unlock_car: {e}")
-        return jsonify({"error": str(e)}), 500
-
-# Lock car endpoint
-@app.route('/lock_car', methods=['POST'])
-def lock_car():
-    print("Received request to /lock_car")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request: Missing or incorrect Authorization header")
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        print("Refreshing vehicle states...")
-        vehicle_manager.update_all_vehicles_with_cached_state()
-
-        # Lock the vehicle using the VehicleManager's lock method
-        result = vehicle_manager.lock(VEHICLE_ID)
-        print(f"Lock result: {result}")
-
-        return jsonify({"status": "Car locked", "result": result}), 200
-    except Exception as e:
-        print(f"Error in /lock_car: {e}")
-        return jsonify({"error": str(e)}), 500
-
-if __name__ == "__main__":
-    print("Starting Kia Vehicle Control API...")
-    app.run(host="0.0.0.0", port=8080)
-
+# ── Lock Status Endpoint ──
 @app.route('/lock_status', methods=['GET'])
+@require_auth
 def lock_status():
-    print("Received request to /lock_status")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request: Missing or incorrect Authorization header")
-        return jsonify({"error": "Unauthorized"}), 403
+    """Get vehicle lock status."""
+    logger.info("Received request to /lock_status")
 
     try:
-        vehicle_manager.update_all_vehicles_with_cached_state()
+        refresh_token_if_needed()
+        vehicle = get_cached_vehicle_state()
+        is_locked = vehicle.is_locked
 
-        vehicle = next(iter(vehicle_manager.vehicles.values()))
-        is_locked = vehicle.is_locked  # This should be a boolean (True/False)
-
-        print(f"Lock status: {'Locked' if is_locked else 'Unlocked'}")
+        logger.info(f"Lock status: {'Locked' if is_locked else 'Unlocked'}")
         return jsonify({"is_locked": is_locked}), 200
 
     except Exception as e:
-        print(f"Error in /lock_status: {e}")
+        logger.error(f"Error in /lock_status: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-# Start climate endpoint
-@app.route('/start_climate', methods=['POST'])
-def start_climate():
-    print("Received request to /start_climate")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request: Missing or incorrect Authorization header")
-        return jsonify({"error": "Unauthorized"}), 403
+# ── Unlock Car Endpoint ──
+@app.route('/unlock_car', methods=['POST'])
+@require_auth
+def unlock_car():
+    """Unlock the vehicle."""
+    logger.info("Received request to /unlock_car")
 
     try:
-        print("Refreshing vehicle states...")
+        refresh_token_if_needed()
         vehicle_manager.update_all_vehicles_with_cached_state()
-        data = request.get_json(force=True)
-        print(f"📦 Incoming payload: {data}")
+
+        result = vehicle_manager.unlock(VEHICLE_ID)
+        logger.info(f"Unlock result: {result}")
+
+        return jsonify({"status": "Car unlocked", "result": result}), 200
+    except Exception as e:
+        logger.error(f"Error in /unlock_car: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+# ── Lock Car Endpoint ──
+@app.route('/lock_car', methods=['POST'])
+@require_auth
+def lock_car():
+    """Lock the vehicle."""
+    logger.info("Received request to /lock_car")
+
+    try:
+        refresh_token_if_needed()
+        vehicle_manager.update_all_vehicles_with_cached_state()
+
+        result = vehicle_manager.lock(VEHICLE_ID)
+        logger.info(f"Lock result: {result}")
+
+        return jsonify({"status": "Car locked", "result": result}), 200
+    except Exception as e:
+        logger.error(f"Error in /lock_car: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+# ── Start Climate Endpoint ──
+@app.route('/start_climate', methods=['POST'])
+@require_auth
+def start_climate():
+    """Start climate control."""
+    logger.info("Received request to /start_climate")
+
+    try:
+        refresh_token_if_needed()
+        vehicle_manager.update_all_vehicles_with_cached_state()
+
+        data = request.get_json() or {}
+        logger.info(f"Incoming payload: {data}")
+
+        # ── Input Validation ──
+        try:
+            set_temp = float(data.get("set_temp", 21))
+            if not 16 <= set_temp <= 30:  # Reasonable temperature range
+                return jsonify({"error": "Temperature must be between 16-30°C"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid temperature value"}), 400
+
+        try:
+            duration = int(data.get("duration", 10))
+            if not 5 <= duration <= 30:  # Reasonable duration range
+                return jsonify({"error": "Duration must be between 5-30 minutes"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid duration value"}), 400
+
+        # Validate seat heating levels (0-3)
+        for seat in ["front_left_seat", "front_right_seat", "rear_left_seat", "rear_right_seat"]:
+            try:
+                level = int(data.get(seat, 0))
+                if not 0 <= level <= 3:
+                    return jsonify({"error": f"{seat} must be between 0-3"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"error": f"Invalid {seat} value"}), 400
+
+        # Validate steering wheel heating (0-3)
+        try:
+            steering = int(data.get("steering_wheel", 0))
+            if not 0 <= steering <= 3:
+                return jsonify({"error": "steering_wheel must be between 0-3"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid steering_wheel value"}), 400
 
         # Create ClimateRequestOptions object
         climate_options = ClimateRequestOptions(
-            climate=data.get("climate", True),
-            set_temp=data.get("set_temp", 21),
-            defrost=data.get("defrost", False),
-            heating=data.get("heating", 1),
-            duration=data.get("duration", 10),
-            front_left_seat=data.get("front_left_seat", 0),
-            front_right_seat=data.get("front_right_seat", 0),
-            rear_left_seat=data.get("rear_left_seat", 0),
-            rear_right_seat=data.get("rear_right_seat", 0),
-            steering_wheel=data.get("steering_wheel", 0)
+            climate=bool(data.get("climate", True)),
+            set_temp=set_temp,
+            defrost=bool(data.get("defrost", False)),
+            heating=int(data.get("heating", 1)),
+            duration=duration,
+            front_left_seat=int(data.get("front_left_seat", 0)),
+            front_right_seat=int(data.get("front_right_seat", 0)),
+            rear_left_seat=int(data.get("rear_left_seat", 0)),
+            rear_right_seat=int(data.get("rear_right_seat", 0)),
+            steering_wheel=steering
         )
 
-        # Start climate control using the VehicleManager's start_climate method
         result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
-        print(f"Start climate result: {result}")
+        logger.info(f"Start climate result: {result}")
 
         return jsonify({"status": "Climate started", "result": result}), 200
     except Exception as e:
-        print(f"Error in /start_climate: {e}")
+        logger.error(f"Error in /start_climate: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-# Stop climate endpoint
+# ── Stop Climate Endpoint ──
 @app.route('/stop_climate', methods=['POST'])
+@require_auth
 def stop_climate():
-    print("Received request to /stop_climate")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        print("Unauthorized request: Missing or incorrect Authorization header")
-        return jsonify({"error": "Unauthorized"}), 403
+    """Stop climate control."""
+    logger.info("Received request to /stop_climate")
 
     try:
-        print("Refreshing vehicle states...")
+        refresh_token_if_needed()
         vehicle_manager.update_all_vehicles_with_cached_state()
 
-        # Stop climate control using the VehicleManager's stop_climate method
         result = vehicle_manager.stop_climate(VEHICLE_ID)
-        print(f"Stop climate result: {result}")
+        logger.info(f"Stop climate result: {result}")
 
         return jsonify({"status": "Climate stopped", "result": result}), 200
     except Exception as e:
-        print(f"Error in /stop_climate: {e}")
+        logger.error(f"Error in /stop_climate: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+# ── Debug Vehicle Endpoint ──
 @app.route('/debug_vehicle', methods=['POST'])
+@require_auth
 def debug_vehicle():
-    print("Received request to /debug_vehicle")
-
-    if request.headers.get("Authorization") != SECRET_KEY:
-        return jsonify({"error": "Unauthorized"}), 403
+    """Debug endpoint to view raw vehicle data."""
+    logger.info("Received request to /debug_vehicle")
 
     try:
+        refresh_token_if_needed()
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
-        # ✅ Access the raw private vehicle data
+        # Access the raw private vehicle data
         raw_data = getattr(vehicle, "_vehicle_data", {})
         ev_status = raw_data.get("vehicleStatus", {}).get("evStatus", {})
 
-        print("🔍 Found evStatus keys:", list(ev_status.keys()))
+        logger.info(f"Found evStatus keys: {list(ev_status.keys())}")
 
         return jsonify({
             "ev_status_raw": ev_status,
@@ -385,8 +488,22 @@ def debug_vehicle():
         }), 200
 
     except Exception as e:
-        import traceback
-        print(f"❌ Error in /debug_vehicle: {e}")
-        traceback.print_exc()
+        logger.error(f"Error in /debug_vehicle: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+# ── Error Handlers ──
+@app.errorhandler(404)
+def not_found(e):
+    """Handle 404 errors."""
+    return jsonify({"error": "Endpoint not found"}), 404
+
+@app.errorhandler(500)
+def internal_error(e):
+    """Handle 500 errors."""
+    logger.error(f"Internal server error: {e}", exc_info=True)
+    return jsonify({"error": "Internal server error"}), 500
+
+# ── Main Entry Point ──
+if __name__ == "__main__":
+    logger.info("Starting Kia Vehicle Control API...")
+    app.run(host="0.0.0.0", port=8080, debug=False)
