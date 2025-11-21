@@ -176,17 +176,46 @@ def log_request_info():
 def health():
     """Health check endpoint for monitoring."""
     initialized = init_vehicle_manager()
-    return jsonify({
+
+    response = {
         "status": "healthy" if initialized else "degraded",
         "timestamp": datetime.now(ZoneInfo("America/Toronto")).isoformat(),
-        "vehicles_count": len(vehicle_manager.vehicles) if vehicle_manager else 0
-    }), 200 if initialized else 503
+        "vehicles_count": len(vehicle_manager.vehicles) if vehicle_manager else 0,
+        "vehicle_manager_initialized": vehicle_manager is not None,
+        "vehicle_id_set": VEHICLE_ID is not None,
+        "vehicle_id": VEHICLE_ID if VEHICLE_ID else "not set"
+    }
+
+    if initialized and vehicle_manager:
+        response["vehicles"] = list(vehicle_manager.vehicles.keys())
+
+    return jsonify(response), 200 if initialized else 503
 
 # ── Root Endpoint ──
 @app.route('/', methods=['GET'])
 def root():
     """Root endpoint."""
     return jsonify({"status": "Welcome to the Kia Vehicle Control API"}), 200
+
+# ── Diagnostic Endpoint ──
+@app.route('/diagnostics', methods=['GET'])
+def diagnostics():
+    """Diagnostic endpoint to check environment configuration (no auth required)."""
+    return jsonify({
+        "env_vars_set": {
+            "KIA_USERNAME": USERNAME is not None and USERNAME != "",
+            "KIA_PASSWORD": PASSWORD is not None and PASSWORD != "",
+            "KIA_PIN": PIN is not None and PIN != "",
+            "SECRET_KEY": SECRET_KEY is not None and SECRET_KEY != "",
+            "VEHICLE_ID": os.environ.get("VEHICLE_ID", "") != "",
+            "BATTERY_CAPACITY_KWH": os.environ.get("BATTERY_CAPACITY_KWH", "") != ""
+        },
+        "global_state": {
+            "vehicle_manager_initialized": vehicle_manager is not None,
+            "vehicle_id_set": VEHICLE_ID is not None,
+            "vehicle_id_value": VEHICLE_ID if VEHICLE_ID else None
+        }
+    }), 200
 
 # ── List Vehicles Endpoint ──
 @app.route('/list_vehicles', methods=['GET'])
