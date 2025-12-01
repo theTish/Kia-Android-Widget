@@ -81,6 +81,22 @@ def init_vehicle_manager():
             )
 
             logger.info("Attempting to authenticate and refresh token...")
+
+            # Monkey patch the requests library to log raw responses
+            import requests
+            original_request = requests.Session.request
+
+            def logged_request(self, method, url, **kwargs):
+                logger.info(f"API Request: {method} {url}")
+                logger.info(f"Request headers: {kwargs.get('headers', {})}")
+                response = original_request(self, method, url, **kwargs)
+                logger.info(f"Response status: {response.status_code}")
+                logger.info(f"Response headers: {dict(response.headers)}")
+                logger.info(f"Response content (first 500 chars): {response.text[:500]}")
+                return response
+
+            requests.Session.request = logged_request
+
             try:
                 vehicle_manager.check_and_refresh_token()
                 logger.info("Token refreshed successfully.")
@@ -90,6 +106,9 @@ def init_vehicle_manager():
                 import traceback
                 logger.error(f"Full traceback: {traceback.format_exc()}")
                 raise
+            finally:
+                # Restore original request method
+                requests.Session.request = original_request
 
             # IMPORTANT: Only call vehicle update ONCE - per user's insight about not calling it multiple times
             logger.info("Fetching vehicles (calling only once)...")
