@@ -55,6 +55,11 @@ def init_vehicle_manager():
     if vehicle_manager is not None and VEHICLE_ID is not None:
         return True
 
+    # If vehicle_manager exists but VEHICLE_ID is None, force re-initialization
+    if vehicle_manager is not None and VEHICLE_ID is None:
+        logger.warning("Vehicle manager exists but VEHICLE_ID is None. Forcing re-initialization...")
+        vehicle_manager = None
+
     # Check credentials first
     if USERNAME is None or PASSWORD is None or PIN is None:
         logger.error("Missing credentials! Check KIA_USERNAME, KIA_PASSWORD, and KIA_PIN environment variables.")
@@ -86,8 +91,19 @@ def init_vehicle_manager():
             logger.info("Token refreshed successfully.")
 
             logger.info("Updating vehicle states...")
-            vehicle_manager.update_all_vehicles_with_cached_state()
-            logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
+            try:
+                # Log before the call
+                logger.info("Calling update_all_vehicles_with_cached_state()...")
+                vehicle_manager.update_all_vehicles_with_cached_state()
+
+                # Log the raw vehicles dict
+                logger.info(f"Raw vehicles dict: {vehicle_manager.vehicles}")
+                logger.info(f"Vehicles dict type: {type(vehicle_manager.vehicles)}")
+                logger.info(f"Vehicles dict keys: {list(vehicle_manager.vehicles.keys()) if vehicle_manager.vehicles else 'EMPTY'}")
+                logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
+            except Exception as update_error:
+                logger.error(f"Error during update_all_vehicles_with_cached_state: {update_error}", exc_info=True)
+                raise
 
             if not vehicle_manager.vehicles:
                 logger.error("No vehicles found in the account.")
