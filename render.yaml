@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: kia-android-widget
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: KIA_USERNAME
+        sync: false
+      - key: KIA_PASSWORD
+        sync: false
+      - key: KIA_PIN
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: KIA_REGION
+        value: 2
+      - key: BATTERY_CAPACITY_KWH
+        value: 77.4
