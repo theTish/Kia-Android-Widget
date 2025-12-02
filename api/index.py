@@ -48,7 +48,7 @@ vehicle_state_cache = {
 rate_limit_store = {}
 
 def init_vehicle_manager():
-    """Initialize vehicle manager lazily on first request using HyundaiBlueLink (working June version)."""
+    """Initialize vehicle manager lazily on first request."""
     global vehicle_manager, VEHICLE_ID
 
     # If already initialized, return success
@@ -65,36 +65,50 @@ def init_vehicle_manager():
         return False
 
     try:
-        # Initialize using HyundaiBlueLink like the working June version
+        # Initialize using VehicleManager exactly like working main.py
         if vehicle_manager is None:
-            from hyundai_kia_connect_api.HyundaiBlueLink import HyundaiBlueLink
+            from hyundai_kia_connect_api import VehicleManager
+            from hyundai_kia_connect_api.exceptions import AuthenticationError
 
-            logger.info("Initializing HyundaiBlueLink API for Kia Canada...")
+            logger.info(f"Initializing Vehicle Manager (Region: {REGION}, Brand: {BRAND_KIA})...")
             logger.info(f"Using PIN with length: {len(PIN)} characters")
 
-            vehicle_manager = HyundaiBlueLink(
+            vehicle_manager = VehicleManager(
+                region=REGION,
+                brand=BRAND_KIA,
                 username=USERNAME,
                 password=PASSWORD,
-                pin=PIN,
-                brand="KIA",
-                region="CA"  # Canada region as string
+                pin=str(PIN)
             )
 
-            logger.info("Attempting to login...")
-            vehicle_manager.login()
-            logger.info("Login successful.")
+            logger.info("Attempting to authenticate and refresh token...")
+            vehicle_manager.check_and_refresh_token()
+            logger.info("Token refreshed successfully.")
 
-            logger.info("Getting vehicles...")
-            vehicles = vehicle_manager.get_vehicles()
-            logger.info(f"Found {len(vehicles)} vehicle(s).")
+            logger.info("Updating vehicle states...")
+            vehicle_manager.update_all_vehicles_with_cached_state()
+            logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
 
-            if not vehicles:
+            if not vehicle_manager.vehicles:
                 logger.error("No vehicles found in the account.")
                 return False
 
-            # Store first vehicle
-            VEHICLE_ID = vehicles[0]
-            logger.info(f"Using vehicle: {VEHICLE_ID}")
+            # Log vehicle details
+            for vid, vehicle in vehicle_manager.vehicles.items():
+                logger.info(f"Vehicle - ID: {vid}, Name: {vehicle.name}, Model: {vehicle.model}")
+
+        # Set VEHICLE_ID if not already set
+        if VEHICLE_ID is None:
+            env_vehicle_id = os.environ.get("VEHICLE_ID", "").strip()
+            if env_vehicle_id:
+                VEHICLE_ID = env_vehicle_id
+                logger.info(f"Using VEHICLE_ID from environment: {VEHICLE_ID}")
+            else:
+                if not vehicle_manager.vehicles:
+                    logger.error("No vehicles found in the account.")
+                    return False
+                VEHICLE_ID = next(iter(vehicle_manager.vehicles.keys()))
+                logger.info(f"No VEHICLE_ID provided. Auto-detected first vehicle: {VEHICLE_ID}")
 
         return True
     except Exception as e:
@@ -104,7 +118,7 @@ def init_vehicle_manager():
         return False
 
 def get_cached_vehicle_state():
-    """Get vehicle state with caching using HyundaiBlueLink API."""
+    """Get vehicle state with caching."""
     if vehicle_manager is None:
         raise RuntimeError("Vehicle manager not initialized")
 
@@ -114,11 +128,12 @@ def get_cached_vehicle_state():
     now = datetime.now()
     if (vehicle_state_cache["last_update"] is None or
         (now - vehicle_state_cache["last_update"]).total_seconds() > CACHE_TTL_SECONDS):
-        logger.info("Cache expired or empty, refreshing vehicle status...")
-        vehicle_state_cache["data"] = vehicle_manager.get_vehicle_status(VEHICLE_ID)
+        logger.info("Cache expired or empty, refreshing vehicle states...")
+        vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle_state_cache["last_update"] = now
 
-    return vehicle_state_cache["data"]
+    logger.info(f"Getting vehicle with ID: {VEHICLE_ID}")
+    return vehicle_manager.get_vehicle(VEHICLE_ID)
 
 def check_rate_limit(client_id: str, max_requests: int = MAX_REQUESTS_PER_MINUTE) -> bool:
     """Simple rate limiting check."""
@@ -142,9 +157,13 @@ def check_rate_limit(client_id: str, max_requests: int = MAX_REQUESTS_PER_MINUTE
     return True
 
 def refresh_token_if_needed():
-    """Refresh token if needed - HyundaiBlueLink handles this internally."""
-    # HyundaiBlueLink API handles token refresh internally
-    pass
+    """Refresh token if needed."""
+    if vehicle_manager is None:
+        return
+    try:
+        vehicle_manager.check_and_refresh_token()
+    except Exception as e:
+        logger.warning(f"Token refresh check failed: {e}")
 
 def require_auth(f):
     """Decorator to require authorization header."""
@@ -181,10 +200,14 @@ def health():
     response = {
         "status": "healthy" if initialized else "degraded",
         "timestamp": datetime.now(ZoneInfo("America/Toronto")).isoformat(),
+        "vehicles_count": len(vehicle_manager.vehicles) if vehicle_manager else 0,
         "vehicle_manager_initialized": vehicle_manager is not None,
         "vehicle_id_set": VEHICLE_ID is not None,
-        "vehicle_id": str(VEHICLE_ID) if VEHICLE_ID else "not set"
+        "vehicle_id": VEHICLE_ID if VEHICLE_ID else "not set"
     }
+
+    if initialized and vehicle_manager:
+        response["vehicles"] = list(vehicle_manager.vehicles.keys())
 
     return jsonify(response), 200 if initialized else 503
 
@@ -248,14 +271,28 @@ def list_vehicles():
     logger.info("Received request to /list_vehicles")
 
     try:
-        vehicles = vehicle_manager.get_vehicles()
+        refresh_token_if_needed()
+        vehicle_manager.update_all_vehicles_with_cached_state()
+
+        vehicles = vehicle_manager.vehicles
 
         if not vehicles:
             logger.warning("No vehicles found in the account")
             return jsonify({"error": "No vehicles found"}), 404
 
-        # HyundaiBlueLink returns vehicle objects
-        vehicle_list = [{"id": str(v)} for v in vehicles]
+        vehicle_list = [
+            {
+                "name": v.name,
+                "id": v.id,
+                "model": v.model,
+                "year": v.year
+            }
+            for v in vehicles.values()
+        ]
+
+        if not vehicle_list:
+            logger.warning("No valid vehicles found in the account")
+            return jsonify({"error": "No valid vehicles found"}), 404
 
         logger.info(f"Returning vehicle list: {vehicle_list}")
         return jsonify({"status": "Success", "vehicles": vehicle_list}), 200
@@ -271,12 +308,13 @@ def vehicle_status():
     logger.info("Received request to /status")
 
     try:
-        vehicle_status = get_cached_vehicle_state()
+        refresh_token_if_needed()
+        vehicle = get_cached_vehicle_state()
 
-        pct = vehicle_status.ev_battery_percentage
-        dur = vehicle_status.ev_estimated_current_charge_duration
-        plugged_in = bool(vehicle_status.ev_battery_is_plugged_in)
-        charging = bool(vehicle_status.ev_battery_is_charging)
+        pct = vehicle.ev_battery_percentage
+        dur = vehicle.ev_estimated_current_charge_duration
+        plugged_in = bool(vehicle.ev_battery_is_plugged_in)
+        charging = bool(vehicle.ev_battery_is_charging)
         limit = 100  # Default charge target
 
         # ── Estimate charging power ──
@@ -287,8 +325,8 @@ def vehicle_status():
 
         actual_kw = None
         try:
-            current = float(vehicle_status.ev_charging_current)
-            voltage = float(vehicle_status.ev_charging_voltage)
+            current = float(vehicle.ev_charging_current)
+            voltage = float(vehicle.ev_charging_voltage)
             actual_kw = round((current * voltage) / 1000, 1)
         except Exception:
             pass
@@ -305,7 +343,7 @@ def vehicle_status():
         # ── Response ──
         resp = {
             "battery_percentage": int(pct),
-            "battery_12v": int(vehicle_status.car_battery_percentage),
+            "battery_12v": int(vehicle.car_battery_percentage),
             "charge_duration": int(dur),
             "charging_eta": eta_time,
             "charging_duration_formatted": eta_duration,
@@ -314,15 +352,15 @@ def vehicle_status():
             "target_charge_limit": limit,
             "is_charging": charging,
             "plugged_in": plugged_in,
-            "is_locked": bool(vehicle_status.is_locked),
-            "engine_running": bool(vehicle_status.engine_is_running),
+            "is_locked": bool(vehicle.is_locked),
+            "engine_running": bool(vehicle.engine_is_running),
             "doors": {
-                "front_left": bool(int(vehicle_status.front_left_door_is_open)),
-                "front_right": bool(int(vehicle_status.front_right_door_is_open)),
-                "back_left": bool(int(vehicle_status.back_left_door_is_open)),
-                "back_right": bool(int(vehicle_status.back_right_door_is_open)),
-                "trunk": bool(vehicle_status.trunk_is_open),
-                "hood": bool(vehicle_status.hood_is_open)
+                "front_left": bool(int(vehicle.front_left_door_is_open)),
+                "front_right": bool(int(vehicle.front_right_door_is_open)),
+                "back_left": bool(int(vehicle.back_left_door_is_open)),
+                "back_right": bool(int(vehicle.back_right_door_is_open)),
+                "trunk": bool(vehicle.trunk_is_open),
+                "hood": bool(vehicle.hood_is_open)
             }
         }
 
@@ -361,10 +399,13 @@ def unlock_car():
     logger.info("Received request to /unlock_car")
 
     try:
+        refresh_token_if_needed()
+        vehicle_manager.update_all_vehicles_with_cached_state()
+
         result = vehicle_manager.unlock(VEHICLE_ID)
         logger.info(f"Unlock result: {result}")
 
-        return jsonify({"status": "Car unlocked", "result": str(result)}), 200
+        return jsonify({"status": "Car unlocked", "result": result}), 200
     except Exception as e:
         logger.error(f"Error in /unlock_car: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -377,10 +418,13 @@ def lock_car():
     logger.info("Received request to /lock_car")
 
     try:
+        refresh_token_if_needed()
+        vehicle_manager.update_all_vehicles_with_cached_state()
+
         result = vehicle_manager.lock(VEHICLE_ID)
         logger.info(f"Lock result: {result}")
 
-        return jsonify({"status": "Car locked", "result": str(result)}), 200
+        return jsonify({"status": "Car locked", "result": result}), 200
     except Exception as e:
         logger.error(f"Error in /lock_car: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -394,6 +438,9 @@ def start_climate():
 
     try:
         from hyundai_kia_connect_api import ClimateRequestOptions
+
+        refresh_token_if_needed()
+        vehicle_manager.update_all_vehicles_with_cached_state()
 
         data = request.get_json() or {}
         logger.info(f"Incoming payload: {data}")
@@ -460,10 +507,13 @@ def stop_climate():
     logger.info("Received request to /stop_climate")
 
     try:
+        refresh_token_if_needed()
+        vehicle_manager.update_all_vehicles_with_cached_state()
+
         result = vehicle_manager.stop_climate(VEHICLE_ID)
         logger.info(f"Stop climate result: {result}")
 
-        return jsonify({"status": "Climate stopped", "result": str(result)}), 200
+        return jsonify({"status": "Climate stopped", "result": result}), 200
     except Exception as e:
         logger.error(f"Error in /stop_climate: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -476,14 +526,19 @@ def debug_vehicle():
     logger.info("Received request to /debug_vehicle")
 
     try:
-        vehicle_status = get_cached_vehicle_state()
+        refresh_token_if_needed()
+        vehicle_manager.update_all_vehicles_with_cached_state()
+        vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
 
-        # Try to get raw data if available
-        raw_data = getattr(vehicle_status, "_vehicle_data", {})
+        # Access the raw private vehicle data
+        raw_data = getattr(vehicle, "_vehicle_data", {})
+        ev_status = raw_data.get("vehicleStatus", {}).get("evStatus", {})
+
+        logger.info(f"Found evStatus keys: {list(ev_status.keys())}")
 
         return jsonify({
-            "vehicle_status": str(vehicle_status),
-            "raw_data": raw_data,
+            "ev_status_raw": ev_status,
+            "keys": list(ev_status.keys()),
         }), 200
 
     except Exception as e:
