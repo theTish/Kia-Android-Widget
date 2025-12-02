@@ -77,53 +77,23 @@ def init_vehicle_manager():
                 brand=BRAND_KIA,
                 username=USERNAME,
                 password=PASSWORD,
-                pin=PIN  # PIN is already a string from environment
+                pin=str(PIN)  # Convert to string like the working version
             )
 
             logger.info("Attempting to authenticate and refresh token...")
+            vehicle_manager.check_and_refresh_token()
+            logger.info("Token refreshed successfully.")
 
-            # Monkey patch the requests library to log raw responses
-            import requests
-            original_request = requests.Session.request
-
-            def logged_request(self, method, url, **kwargs):
-                logger.info(f"API Request: {method} {url}")
-                logger.info(f"Request headers: {kwargs.get('headers', {})}")
-                response = original_request(self, method, url, **kwargs)
-                logger.info(f"Response status: {response.status_code}")
-                logger.info(f"Response headers: {dict(response.headers)}")
-                logger.info(f"Response content (first 500 chars): {response.text[:500]}")
-                return response
-
-            requests.Session.request = logged_request
-
-            try:
-                vehicle_manager.check_and_refresh_token()
-                logger.info("Token refreshed successfully.")
-            except Exception as auth_error:
-                logger.error(f"Authentication failed: {auth_error}", exc_info=True)
-                # Try to capture more details about what the API returned
-                import traceback
-                logger.error(f"Full traceback: {traceback.format_exc()}")
-                raise
-            finally:
-                # Restore original request method
-                requests.Session.request = original_request
-
-            # IMPORTANT: Only call vehicle update ONCE - per user's insight about not calling it multiple times
-            # Use force_refresh instead of cached_state due to Canadian API issue where cached endpoint returns empty
-            # See: https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/issues/817
-            logger.info("Fetching vehicles using force refresh (calling only once)...")
-            vehicle_manager.force_refresh_all_vehicles_states()
-            logger.info(f"Found {len(vehicle_manager.vehicles)} vehicle(s).")
+            logger.info("Updating vehicle states...")
+            vehicle_manager.update_all_vehicles_with_cached_state()
+            logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
 
             # Log vehicle details if found
             if vehicle_manager.vehicles:
                 for vid, vehicle in vehicle_manager.vehicles.items():
                     logger.info(f"Vehicle - ID: {vid}, Name: {vehicle.name}, Model: {vehicle.model}")
             else:
-                logger.error("No vehicles found in the account after single fetch attempt.")
-                logger.error("This may indicate a Canadian API endpoint issue. Check if vehicle appears in official Kia app.")
+                logger.error("No vehicles found in the account.")
                 return False
 
         # Set VEHICLE_ID if not already set
@@ -141,7 +111,7 @@ def init_vehicle_manager():
 
         return True
     except Exception as e:
-        logger.error(f"Failed to initialize vehicle manager: {e}", exc_info=True)
+        logger.error(f"Failed to initialize vehicle manager: {e}")
         return False
 
 def get_cached_vehicle_state():
