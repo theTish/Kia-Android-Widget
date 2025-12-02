@@ -87,8 +87,43 @@ def init_vehicle_manager():
             )
 
             logger.info("Attempting to authenticate and refresh token...")
-            vehicle_manager.check_and_refresh_token()
-            logger.info("Token refreshed successfully.")
+
+            # Temporarily monkey-patch the API to log the raw response
+            original_login = vehicle_manager.api.login
+            def logged_login(username, password):
+                import requests
+                # Call the original login but catch the error to log the response
+                try:
+                    return original_login(username, password)
+                except Exception as e:
+                    # Try to get the last response from the session
+                    if hasattr(vehicle_manager.api, 'sessions'):
+                        logger.error(f"Login failed. Checking session history...")
+                        # The error happened during response.json(), so the response object might still be accessible
+                    logger.error(f"Login exception: {e}")
+                    raise
+
+            vehicle_manager.api.login = logged_login
+
+            try:
+                vehicle_manager.check_and_refresh_token()
+                logger.info("Token refreshed successfully.")
+            except Exception as auth_error:
+                logger.error(f"Authentication error: {auth_error}")
+                # Try to make a direct request to see what we get
+                logger.info("Attempting direct API call to diagnose...")
+                try:
+                    import requests
+                    test_url = "https://prd.ca-cwp.kia.com/api/v2/login"
+                    test_data = {"username": USERNAME, "password": PASSWORD}
+                    test_headers = {"Content-Type": "application/json"}
+                    test_response = requests.post(test_url, json=test_data, headers=test_headers, timeout=10)
+                    logger.info(f"Direct API test - Status: {test_response.status_code}")
+                    logger.info(f"Direct API test - Headers: {dict(test_response.headers)}")
+                    logger.info(f"Direct API test - Body (first 500 chars): {test_response.text[:500]}")
+                except Exception as test_error:
+                    logger.error(f"Direct API test failed: {test_error}")
+                raise
 
             logger.info("Updating vehicle states...")
             try:
