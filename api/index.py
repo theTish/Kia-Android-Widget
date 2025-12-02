@@ -111,8 +111,10 @@ def init_vehicle_manager():
                 requests.Session.request = original_request
 
             # IMPORTANT: Only call vehicle update ONCE - per user's insight about not calling it multiple times
-            logger.info("Fetching vehicles (calling only once)...")
-            vehicle_manager.update_all_vehicles_with_cached_state()
+            # Use force_refresh instead of cached_state due to Canadian API issue where cached endpoint returns empty
+            # See: https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/issues/817
+            logger.info("Fetching vehicles using force refresh (calling only once)...")
+            vehicle_manager.force_refresh_all_vehicles_states()
             logger.info(f"Found {len(vehicle_manager.vehicles)} vehicle(s).")
 
             # Log vehicle details if found
@@ -121,6 +123,7 @@ def init_vehicle_manager():
                     logger.info(f"Vehicle - ID: {vid}, Name: {vehicle.name}, Model: {vehicle.model}")
             else:
                 logger.error("No vehicles found in the account after single fetch attempt.")
+                logger.error("This may indicate a Canadian API endpoint issue. Check if vehicle appears in official Kia app.")
                 return False
 
         # Set VEHICLE_ID if not already set
