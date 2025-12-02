@@ -50,7 +50,7 @@ vehicle_manager = VehicleManager(
     brand=BRAND_KIA,
     username=USERNAME,
     password=PASSWORD,
-    pin=PIN  # Already a string from environment
+    pin=str(PIN)  # Convert to string to preserve leading zeros
 )
 
 # ── Authenticate and Initialize ──
