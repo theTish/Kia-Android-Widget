@@ -1,9 +1,33 @@
 import os
 import logging
+import socket
 from functools import wraps
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
+
+# ── Force DNS resolution to use Google DNS (8.8.8.8) ──
+# This fixes Vercel's DNS resolution issues with prd.ca-cwp.kia.com
+import dns.resolver
+dns_resolver = dns.resolver.Resolver()
+dns_resolver.nameservers = ['8.8.8.8', '1.1.1.1']  # Google and Cloudflare DNS
+
+# Monkey-patch socket.getaddrinfo to use our custom DNS
+original_getaddrinfo = socket.getaddrinfo
+def custom_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    """Custom DNS resolution using public DNS servers."""
+    try:
+        # Try to resolve using custom DNS resolver
+        answers = dns_resolver.resolve(host, 'A')
+        ip = str(answers[0])
+        logger.debug(f"Resolved {host} to {ip} using custom DNS")
+        # Return in the same format as getaddrinfo
+        return original_getaddrinfo(ip, port, family, type, proto, flags)
+    except Exception as e:
+        logger.warning(f"Custom DNS failed for {host}: {e}, falling back to system DNS")
+        return original_getaddrinfo(host, port, family, type, proto, flags)
+
+socket.getaddrinfo = custom_getaddrinfo
 
 # ── Constants ──
 # Region codes: 1=Europe, 2=Canada, 3=USA, 4=China, 5=Australia
