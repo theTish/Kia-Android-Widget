@@ -1,12 +1,39 @@
 
 import os
 import logging
+import socket
 from functools import wraps
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
 from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
 from hyundai_kia_connect_api.exceptions import AuthenticationError
+
+# ── DNS Resolution Fix for Vercel ──
+# Vercel's Lambda environment has DNS issues resolving prd.ca-cwp.kia.com
+# Use custom DNS resolution via dnspython to bypass this issue
+try:
+    import dns.resolver
+    dns_resolver = dns.resolver.Resolver()
+    dns_resolver.nameservers = ['8.8.8.8', '1.1.1.1']  # Google and Cloudflare DNS
+
+    # Monkey-patch socket.getaddrinfo to use custom DNS
+    original_getaddrinfo = socket.getaddrinfo
+    def custom_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        """Custom DNS resolution using public DNS servers."""
+        try:
+            answers = dns_resolver.resolve(host, 'A')
+            ip = str(answers[0])
+            print(f"[DNS] Resolved {host} to {ip} using custom DNS")
+            return original_getaddrinfo(ip, port, family, type, proto, flags)
+        except Exception as e:
+            print(f"[DNS] Custom DNS failed for {host}: {e}, falling back to system DNS")
+            return original_getaddrinfo(host, port, family, type, proto, flags)
+
+    socket.getaddrinfo = custom_getaddrinfo
+    print("[DNS] Custom DNS resolver activated")
+except ImportError:
+    print("[DNS] dnspython not available, using system DNS")
 
 # ── Constants ──
 REGION_NORTH_AMERICA = 2
