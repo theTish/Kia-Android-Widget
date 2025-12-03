@@ -62,43 +62,83 @@ PIN = os.environ.get('KIA_PIN')
 SECRET_KEY = os.environ.get("SECRET_KEY")
 BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH", DEFAULT_BATTERY_CAPACITY_KWH))
 
-if USERNAME is None or PASSWORD is None or PIN is None:
-    raise ValueError("Missing credentials! Check KIA_USERNAME, KIA_PASSWORD, and KIA_PIN environment variables.")
+# Debug: Log PIN length (not the actual PIN for security)
+if PIN:
+    logger.info(f"KIA_PIN length: {len(PIN)} characters")
 
-if not SECRET_KEY:
-    raise ValueError("Missing SECRET_KEY environment variable.")
+# ── Global state (lazy initialization for serverless) ──
+vehicle_manager = None
+VEHICLE_ID = None
 
-# ── Initialize Vehicle Manager ──
-vehicle_manager = VehicleManager(
-    region=REGION_NORTH_AMERICA,
-    brand=BRAND_KIA,
-    username=USERNAME,
-    password=PASSWORD,
-    pin=str(PIN)
-)
+def init_vehicle_manager():
+    """Initialize vehicle manager lazily on first request (serverless-compatible)."""
+    global vehicle_manager, VEHICLE_ID
 
-# ── Authenticate and Initialize ──
-try:
-    logger.info("Attempting to authenticate and refresh token...")
-    vehicle_manager.check_and_refresh_token()
-    logger.info("Token refreshed successfully.")
-    logger.info("Updating vehicle states...")
-    vehicle_manager.update_all_vehicles_with_cached_state()
-    logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
-except AuthenticationError as e:
-    logger.error(f"Failed to authenticate: {e}")
-    exit(1)
-except Exception as e:
-    logger.error(f"Unexpected error during initialization: {e}")
-    exit(1)
+    # If already initialized, return success
+    if vehicle_manager is not None and VEHICLE_ID is not None:
+        return True
 
-# ── Dynamically fetch VEHICLE_ID ──
-VEHICLE_ID = os.environ.get("VEHICLE_ID")
-if not VEHICLE_ID:
-    if not vehicle_manager.vehicles:
-        raise ValueError("No vehicles found in the account. Please ensure your Kia account has at least one vehicle.")
-    VEHICLE_ID = next(iter(vehicle_manager.vehicles.keys()))
-    logger.info(f"No VEHICLE_ID provided. Using the first vehicle found: {VEHICLE_ID}")
+    # Check credentials first
+    if USERNAME is None or PASSWORD is None or PIN is None:
+        logger.error("Missing credentials! Check KIA_USERNAME, KIA_PASSWORD, and KIA_PIN environment variables.")
+        return False
+
+    if not SECRET_KEY:
+        logger.error("Missing SECRET_KEY environment variable.")
+        return False
+
+    try:
+        # Initialize using VehicleManager
+        if vehicle_manager is None:
+            logger.info(f"Initializing Vehicle Manager (Region: {REGION_NORTH_AMERICA}, Brand: {BRAND_KIA})...")
+            logger.info(f"Using PIN with length: {len(PIN)} characters")
+
+            vehicle_manager = VehicleManager(
+                region=REGION_NORTH_AMERICA,
+                brand=BRAND_KIA,
+                username=USERNAME,
+                password=PASSWORD,
+                pin=str(PIN)
+            )
+
+            logger.info("Attempting to authenticate and refresh token...")
+            vehicle_manager.check_and_refresh_token()
+            logger.info("Token refreshed successfully.")
+
+            logger.info("Updating vehicle states...")
+            vehicle_manager.update_all_vehicles_with_cached_state()
+            logger.info(f"Connected! Found {len(vehicle_manager.vehicles)} vehicle(s).")
+
+            if not vehicle_manager.vehicles:
+                logger.error("No vehicles found in the account.")
+                return False
+
+            # Log vehicle details
+            for vid, vehicle in vehicle_manager.vehicles.items():
+                logger.info(f"Vehicle - ID: {vid}, Name: {vehicle.name}, Model: {vehicle.model}")
+
+        # Set VEHICLE_ID if not already set
+        if VEHICLE_ID is None:
+            env_vehicle_id = os.environ.get("VEHICLE_ID", "").strip()
+            if env_vehicle_id:
+                VEHICLE_ID = env_vehicle_id
+                logger.info(f"Using VEHICLE_ID from environment: {VEHICLE_ID}")
+            else:
+                if not vehicle_manager.vehicles:
+                    logger.error("No vehicles found in the account.")
+                    return False
+                VEHICLE_ID = next(iter(vehicle_manager.vehicles.keys()))
+                logger.info(f"No VEHICLE_ID provided. Auto-detected first vehicle: {VEHICLE_ID}")
+
+        return True
+    except AuthenticationError as e:
+        logger.error(f"Failed to authenticate: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to initialize vehicle manager: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 # ── Cache Management ──
 vehicle_state_cache = {
@@ -108,12 +148,20 @@ vehicle_state_cache = {
 
 def get_cached_vehicle_state():
     """Get vehicle state with caching."""
+    if vehicle_manager is None:
+        raise RuntimeError("Vehicle manager not initialized")
+
+    if VEHICLE_ID is None:
+        raise RuntimeError("VEHICLE_ID not set")
+
     now = datetime.now()
     if (vehicle_state_cache["last_update"] is None or
         (now - vehicle_state_cache["last_update"]).total_seconds() > CACHE_TTL_SECONDS):
         logger.info("Cache expired or empty, refreshing vehicle states...")
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle_state_cache["last_update"] = now
+
+    logger.info(f"Getting vehicle with ID: {VEHICLE_ID}")
     return vehicle_manager.get_vehicle(VEHICLE_ID)
 
 # ── Rate Limiting (Simple implementation) ──
@@ -143,6 +191,8 @@ def check_rate_limit(client_id: str, max_requests: int = MAX_REQUESTS_PER_MINUTE
 # ── Token Refresh Helper ──
 def refresh_token_if_needed():
     """Refresh token if needed."""
+    if vehicle_manager is None:
+        return
     try:
         vehicle_manager.check_and_refresh_token()
     except Exception as e:
@@ -153,6 +203,10 @@ def require_auth(f):
     """Decorator to require authorization header."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Initialize vehicle manager lazily
+        if not init_vehicle_manager():
+            return jsonify({"error": "Service initialization failed. Check credentials and try again."}), 503
+
         auth_header = request.headers.get("Authorization")
         if auth_header != SECRET_KEY:
             logger.warning(f"Unauthorized request to {request.path} from {request.remote_addr}")
@@ -176,17 +230,72 @@ def log_request_info():
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint for monitoring."""
-    return jsonify({
-        "status": "healthy",
+    initialized = init_vehicle_manager()
+
+    response = {
+        "status": "healthy" if initialized else "degraded",
         "timestamp": datetime.now(ZoneInfo("America/Toronto")).isoformat(),
-        "vehicles_count": len(vehicle_manager.vehicles)
-    }), 200
+        "vehicles_count": len(vehicle_manager.vehicles) if vehicle_manager else 0,
+        "vehicle_manager_initialized": vehicle_manager is not None,
+        "vehicle_id_set": VEHICLE_ID is not None,
+        "vehicle_id": VEHICLE_ID if VEHICLE_ID else "not set"
+    }
+
+    if initialized and vehicle_manager:
+        response["vehicles"] = list(vehicle_manager.vehicles.keys())
+
+    return jsonify(response), 200 if initialized else 503
 
 # ── Root Endpoint ──
 @app.route('/', methods=['GET'])
 def root():
     """Root endpoint."""
     return jsonify({"status": "Welcome to the Kia Vehicle Control API"}), 200
+
+# ── Diagnostic Endpoint ──
+@app.route('/diagnostics', methods=['GET'])
+def diagnostics():
+    """Diagnostic endpoint to check environment configuration (no auth required)."""
+    region_names = {1: "Europe", 2: "Canada", 3: "USA", 4: "China", 5: "Australia"}
+
+    # Check credential format issues
+    credential_warnings = []
+    if USERNAME and ('@' not in USERNAME):
+        credential_warnings.append("KIA_USERNAME should be an email address")
+
+    pin_length = len(PIN) if PIN else 0
+    if PIN and pin_length != 4:
+        credential_warnings.append(f"KIA_PIN should be 4 digits, got length: {pin_length}")
+
+    # Add info about PIN length to help debug
+    pin_info = {
+        "length": pin_length,
+        "starts_with_zero": PIN.startswith('0') if PIN else False
+    }
+
+    return jsonify({
+        "env_vars_set": {
+            "KIA_USERNAME": USERNAME is not None and USERNAME != "",
+            "KIA_PASSWORD": PASSWORD is not None and PASSWORD != "",
+            "KIA_PIN": PIN is not None and PIN != "",
+            "SECRET_KEY": SECRET_KEY is not None and SECRET_KEY != "",
+            "VEHICLE_ID": os.environ.get("VEHICLE_ID", "") != "",
+            "BATTERY_CAPACITY_KWH": os.environ.get("BATTERY_CAPACITY_KWH", "") != "",
+        },
+        "configuration": {
+            "region_code": REGION_NORTH_AMERICA,
+            "region_name": region_names.get(REGION_NORTH_AMERICA, "Unknown"),
+            "battery_capacity_kwh": BATTERY_CAPACITY_KWH,
+            "brand": BRAND_KIA
+        },
+        "pin_info": pin_info,
+        "global_state": {
+            "vehicle_manager_initialized": vehicle_manager is not None,
+            "vehicle_id_set": VEHICLE_ID is not None,
+            "vehicle_id_value": VEHICLE_ID if VEHICLE_ID else None
+        },
+        "warnings": credential_warnings if credential_warnings else None
+    }), 200
 
 # ── List Vehicles Endpoint ──
 @app.route('/list_vehicles', methods=['GET'])
