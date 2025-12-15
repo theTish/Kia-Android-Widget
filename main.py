@@ -1,13 +1,20 @@
 import os
 import logging
 from functools import wraps
+import os
 from datetime import datetime, timedelta
+from functools import wraps
 from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
 from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
+
+from flask import Flask, jsonify, request
+from hyundai_kia_connect_api import ClimateRequestOptions, VehicleManager
 from hyundai_kia_connect_api.exceptions import AuthenticationError
 
 # ── Constants ──
+REGION_NORTH_AMERICA = 2
+DEFAULT_REGION = 2  # Canada
 REGION_CODES = {
     1: "Europe",
     2: "Canada",
@@ -15,8 +22,6 @@ REGION_CODES = {
     4: "China",
     5: "Australia",
 }
-# Region codes: 1=Europe, 2=Canada, 3=USA, 4=China, 5=Australia
-DEFAULT_REGION = 2  # Canada
 BRAND_KIA = 1
 DEFAULT_BATTERY_CAPACITY_KWH = 77.4
 CACHE_TTL_SECONDS = 30
@@ -32,6 +37,8 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
 
@@ -41,125 +48,94 @@ PASSWORD = os.environ.get('KIA_PASSWORD')
 PIN = os.environ.get('KIA_PIN')  # Keep as string to preserve leading zeros
 SECRET_KEY = os.environ.get("SECRET_KEY")
 BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH") or DEFAULT_BATTERY_CAPACITY_KWH)
-REGION = int(os.environ.get("KIA_REGION") or DEFAULT_REGION)
-region_env_raw = os.environ.get("KIA_REGION")
-region_env = region_env_raw.strip() if region_env_raw else None
-if region_env:
-    try:
-        REGION = int(region_env)
-        if REGION not in REGION_CODES:
-            raise ValueError
-    except ValueError:
-        raise ValueError(
-            f"Invalid KIA_REGION '{region_env_raw}'. Valid options are: {sorted(REGION_CODES.keys())}"
-        )
-else:
-    REGION = DEFAULT_REGION
+# ── Flask App Setup ──
+app = Flask(__name__)
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(24).hex())
+app.config["JSON_SORT_KEYS"] = False
+
+if USERNAME is None or PASSWORD is None or PIN is None:
+    raise ValueError("Missing credentials! Check KIA_USERNAME, KIA_PASSWORD, and KIA_PIN environment variables.")
+
+if not SECRET_KEY:
+    raise ValueError("Missing SECRET_KEY environment variable.")
+# ── Environment Helpers ──
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if value is None:
+        raise ValueError(f"Missing {name} environment variable.")
+    return value
 
 # Debug: Log PIN length (not the actual PIN for security)
-if PIN:
-    logger.info(f"KIA_PIN length: {len(PIN)} characters")
+logger.info(f"KIA_PIN length: {len(PIN)} characters")
 
-# ── Global state ──
-vehicle_manager = None
-VEHICLE_ID = None
-vehicle_state_cache = {
-    "last_update": None,
-    "data": None
-}
-rate_limit_store = {}
+# ── Initialize Vehicle Manager ──
+vehicle_manager = VehicleManager(
+    region=REGION_NORTH_AMERICA,
+    brand=BRAND_KIA,
+    username=USERNAME,
+    password=PASSWORD,
+    pin=str(PIN)  # Convert to string to preserve leading zeros
+def _parse_region(env_value: str | None) -> int:
+    if not env_value:
+        return DEFAULT_REGION
 
-def init_vehicle_manager():
-    """Initialize vehicle manager lazily on first request."""
-    global vehicle_manager, VEHICLE_ID
+    cleaned = env_value.strip()
+    try:
+        region = int(cleaned)
+    except ValueError:
+        raise ValueError(
+            f"Invalid KIA_REGION '{env_value}'. Valid options are: {sorted(REGION_CODES.keys())}"
+        ) from None
 
-    # If already initialized, return success
-    if vehicle_manager is not None and VEHICLE_ID is not None:
-        return True
+    if region not in REGION_CODES:
+        raise ValueError(
+            f"Invalid KIA_REGION '{env_value}'. Valid options are: {sorted(REGION_CODES.keys())}"
+        )
+    return region
 
-    # If vehicle_manager exists but VEHICLE_ID is None, force re-initialization
-    if vehicle_manager is not None and VEHICLE_ID is None:
-        logger.warning("Vehicle manager exists but VEHICLE_ID is None. Forcing re-initialization...")
-        vehicle_manager = None
 
-    # Check credentials first
-    if USERNAME is None or PASSWORD is None or PIN is None:
-        logger.error("Missing credentials! Check KIA_USERNAME, KIA_PASSWORD, and KIA_PIN environment variables.")
-        return False
+# ── Environment Variables ──
+USERNAME = _require_env("KIA_USERNAME")
+PASSWORD = _require_env("KIA_PASSWORD")
+PIN = _require_env("KIA_PIN")  # Keep as string to preserve leading zeros
+SECRET_KEY = _require_env("SECRET_KEY")
+BATTERY_CAPACITY_KWH = float(
+    os.environ.get("BATTERY_CAPACITY_KWH") or DEFAULT_BATTERY_CAPACITY_KWH
+)
+REGION = _parse_region(os.environ.get("KIA_REGION"))
 
-    if not SECRET_KEY:
-        logger.error("Missing SECRET_KEY environment variable.")
-        return False
+logger.info(f"Using region {REGION} ({REGION_CODES.get(REGION, 'Unknown')})")
+logger.info(f"KIA_PIN length: {len(PIN)} characters")
+
+
+# ── Vehicle Manager Initialization ──
+def _init_vehicle_manager() -> VehicleManager:
+    vm = VehicleManager(
+        region=REGION,
+        brand=BRAND_KIA,
+        username=USERNAME,
+        password=PASSWORD,
+        pin=str(PIN),
+    )
 
     try:
-        # Initialize using VehicleManager exactly like working main.py
-        if vehicle_manager is None:
-            from hyundai_kia_connect_api import VehicleManager
-            from hyundai_kia_connect_api.exceptions import AuthenticationError
+        logger.info("Attempting to authenticate and refresh token...")
+        vm.check_and_refresh_token()
+        logger.info("Token refreshed successfully.")
+        logger.info("Updating vehicle states...")
+        vm.update_all_vehicles_with_cached_state()
+        logger.info(f"Connected! Found {len(vm.vehicles)} vehicle(s).")
+    except AuthenticationError as exc:
+        logger.error(f"Failed to authenticate: {exc}")
+        raise
+    except Exception as exc:  # pragma: no cover - unexpected init errors
+        logger.error(f"Unexpected error during initialization: {exc}")
+        raise
 
-            logger.info(f"Initializing Vehicle Manager (Region: {REGION}, Brand: {BRAND_KIA})...")
-            logger.info(
-                f"Initializing Vehicle Manager (Region: {REGION} ({REGION_CODES.get(REGION, 'Unknown')}), "
-                f"Brand: {BRAND_KIA})..."
-            )
-            logger.info(f"Using PIN with length: {len(PIN)} characters")
+    return vm
 
-            vehicle_manager = VehicleManager(
-                region=REGION,
-                brand=BRAND_KIA,
-                username=USERNAME,
-                password=PASSWORD,
-                pin=str(PIN)
-            )
 
-            logger.info("Attempting to authenticate and refresh token...")
-
-            # Temporarily monkey-patch the API to log the raw response
-            original_login = vehicle_manager.api.login
-            def logged_login(username, password):
-                import requests
-                # Call the original login but catch the error to log the response
-                try:
-                    return original_login(username, password)
-                except Exception as e:
-                    # Try to get the last response from the session
-                    if hasattr(vehicle_manager.api, 'sessions'):
-                        logger.error(f"Login failed. Checking session history...")
-                        # The error happened during response.json(), so the response object might still be accessible
-                    logger.error(f"Login exception: {e}")
-                    raise
-
-            vehicle_manager.api.login = logged_login
-
-            try:
-                vehicle_manager.check_and_refresh_token()
-                logger.info("Token refreshed successfully.")
-            except Exception as auth_error:
-                logger.error(f"Authentication error: {auth_error}")
-                # Try to make a direct request to see what we get
-                logger.info("Attempting direct API call to diagnose...")
-                try:
-                    import requests
-                    test_url = "https://prd.ca-cwp.kia.com/api/v2/login"
-                    test_data = {"username": USERNAME, "password": PASSWORD}
-
-                    # Mirror the base URL used by hyundai_kia_connect_api for consistency
-                    base_url_by_region = {
-                        2: "https://kiaconnect.ca/tods/api/",  # Canada
-                        3: "https://api.kiaamerica.com/tods/api/",  # USA
-                        1: "https://prd.eu-ccapi.kia.com:8080/api/v1/",  # Europe
-                        5: "https://prd.au-ccapi.kia.com/api/v1/",  # Australia
-                    }
-                    test_url = base_url_by_region.get(REGION, "https://kiaconnect.ca/tods/api/") + "v2/login"
-                    test_data = {"loginId": USERNAME, "password": PASSWORD}
-                    test_headers = {"Content-Type": "application/json"}
-                    test_response = requests.post(test_url, json=test_data, headers=test_headers, timeout=10)
-                    logger.info(f"Direct API test - Status: {test_response.status_code}")
-                    logger.info(f"Direct API test - Headers: {dict(test_response.headers)}")
-                    logger.info(f"Direct API test - Body (first 500 chars): {test_response.text[:500]}")
-                except Exception as test_error:
-                    logger.error(f"Direct API test failed: {test_error}")
-                raise
+vehicle_manager = _init_vehicle_manager()
 
 # ── Authenticate and Initialize ──
 try:
@@ -181,27 +157,40 @@ VEHICLE_ID = os.environ.get("VEHICLE_ID")
 if not VEHICLE_ID:
     if not vehicle_manager.vehicles:
         raise ValueError("No vehicles found in the account. Please ensure your Kia account has at least one vehicle.")
+        raise ValueError(
+            "No vehicles found in the account. Please ensure your Kia account has at least one vehicle."
+        )
     VEHICLE_ID = next(iter(vehicle_manager.vehicles.keys()))
     logger.info(f"No VEHICLE_ID provided. Using the first vehicle found: {VEHICLE_ID}")
+
 
 # ── Cache Management ──
 vehicle_state_cache = {
     "last_update": None,
     "data": None
+    "data": None,
 }
+
 
 def get_cached_vehicle_state():
     """Get vehicle state with caching."""
     now = datetime.now()
     if (vehicle_state_cache["last_update"] is None or
         (now - vehicle_state_cache["last_update"]).total_seconds() > CACHE_TTL_SECONDS):
+    if (
+        vehicle_state_cache["last_update"] is None
+        or (now - vehicle_state_cache["last_update"]).total_seconds() > CACHE_TTL_SECONDS
+    ):
         logger.info("Cache expired or empty, refreshing vehicle states...")
         vehicle_manager.update_all_vehicles_with_cached_state()
         vehicle_state_cache["last_update"] = now
     return vehicle_manager.get_vehicle(VEHICLE_ID)
 
+
 # ── Rate Limiting (Simple implementation) ──
 rate_limit_store = {}
+rate_limit_store: dict[str, list[datetime]] = {}
+
 
 def check_rate_limit(client_id: str, max_requests: int = MAX_REQUESTS_PER_MINUTE) -> bool:
     """Simple rate limiting check."""
@@ -222,7 +211,9 @@ def check_rate_limit(client_id: str, max_requests: int = MAX_REQUESTS_PER_MINUTE
         rate_limit_store[client_id] = []
     rate_limit_store[client_id].append(now)
 
+    rate_limit_store.setdefault(client_id, []).append(now)
     return True
+
 
 # ── Token Refresh Helper ──
 def refresh_token_if_needed():
@@ -231,33 +222,45 @@ def refresh_token_if_needed():
         vehicle_manager.check_and_refresh_token()
     except Exception as e:
         logger.warning(f"Token refresh check failed: {e}")
+    except Exception as exc:  # pragma: no cover - transient network/API issues
+        logger.warning(f"Token refresh check failed: {exc}")
+
 
 # ── Authorization Decorator ──
 def require_auth(f):
     """Decorator to require authorization header."""
+
     @wraps(f)
     def decorated(*args, **kwargs):
         auth_header = request.headers.get("Authorization")
         if auth_header != SECRET_KEY:
             logger.warning(f"Unauthorized request to {request.path} from {request.remote_addr}")
+            logger.warning(
+                f"Unauthorized request to {request.path} from {request.remote_addr}"
+            )
             return jsonify({"error": "Unauthorized"}), 403
 
         # Rate limiting
         client_id = request.remote_addr
+        client_id = request.remote_addr or "unknown"
         if not check_rate_limit(client_id):
             logger.warning(f"Rate limit exceeded for {client_id}")
             return jsonify({"error": "Rate limit exceeded. Please try again later."}), 429
 
         return f(*args, **kwargs)
+
     return decorated
+
 
 # ── Request Logging ──
 @app.before_request
 def log_request_info():
     logger.info(f"Incoming request: {request.method} {request.url} from {request.remote_addr}")
 
+
 # ── Health Check Endpoint ──
 @app.route('/health', methods=['GET'])
+@app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint for monitoring."""
     return jsonify({
@@ -265,15 +268,29 @@ def health():
         "timestamp": datetime.now(ZoneInfo("America/Toronto")).isoformat(),
         "vehicles_count": len(vehicle_manager.vehicles)
     }), 200
+    return (
+        jsonify(
+            {
+                "status": "healthy",
+                "timestamp": datetime.now(ZoneInfo("America/Toronto")).isoformat(),
+                "vehicles_count": len(vehicle_manager.vehicles),
+            }
+        ),
+        200,
+    )
+
 
 # ── Root Endpoint ──
 @app.route('/', methods=['GET'])
+@app.route("/", methods=["GET"])
 def root():
     """Root endpoint."""
     return jsonify({"status": "Welcome to the Kia Vehicle Control API"}), 200
 
+
 # ── List Vehicles Endpoint ──
 @app.route('/list_vehicles', methods=['GET'])
+@app.route("/list_vehicles", methods=["GET"])
 @require_auth
 def list_vehicles():
     """List all vehicles in the account."""
@@ -294,6 +311,7 @@ def list_vehicles():
                 "id": v.id,
                 "model": v.model,
                 "year": v.year
+                "year": v.year,
             }
             for v in vehicles.values()
         ]
@@ -307,9 +325,14 @@ def list_vehicles():
     except Exception as e:
         logger.error(f"Error in /list_vehicles: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        logger.error(f"Error in /list_vehicles: {exc}", exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
 
 # ── Vehicle Status Endpoint ──
 @app.route('/status', methods=['POST'])
+@app.route("/status", methods=["POST"])
 @require_auth
 def vehicle_status():
     """Get current vehicle status."""
@@ -327,6 +350,8 @@ def vehicle_status():
             logger.info(f"Charge limits raw: {charge_limits}")
         except Exception as e:
             logger.error(f"Failed to get charge limits: {e}")
+        except Exception as exc:  # pragma: no cover - best-effort logging
+            logger.error(f"Failed to get charge limits: {exc}")
 
         # ── Determine plug type ──
         try:
@@ -347,8 +372,10 @@ def vehicle_status():
 
         # ── Choose the right limit ──
         if plug_type == 1:         # DC
+        if plug_type == 1:  # DC
             target_limit = dc_limit
         elif plug_type == 2:       # AC
+        elif plug_type == 2:  # AC
             target_limit = ac_limit
         else:
             target_limit = ac_limit  # default if unplugged
@@ -374,19 +401,29 @@ def vehicle_status():
             logger.info(f"Actual power (calculated): {actual_kw} kW")
         except Exception as e:
             logger.error(f"Couldn't compute actual power: {e}")
+        except Exception as exc:  # pragma: no cover - depends on vehicle data
+            logger.error(f"Couldn't compute actual power: {exc}")
 
         # ── Pull raw values from evStatus (if available) ──
         try:
             raw_status = vehicle_manager.api._get_cached_vehicle_status(vehicle_manager.token, vehicle)
+            raw_status = vehicle_manager.api._get_cached_vehicle_status(
+                vehicle_manager.token, vehicle
+            )
             ev_status = raw_status.get("vehicleStatus", {}).get("evStatus", {})
         except Exception as e:
             logger.error(f"Could not fetch evStatus: {e}")
+        except Exception as exc:  # pragma: no cover - depends on API
+            logger.error(f"Could not fetch evStatus: {exc}")
             ev_status = {}
 
         api_charging_power = ev_status.get("chargingPower")
         api_estimated_power = ev_status.get("estimatedChargingPow")
 
         logger.info(f"API chargingPower: {api_charging_power}, estimatedChargingPow: {api_estimated_power}")
+        logger.info(
+            f"API chargingPower: {api_charging_power}, estimatedChargingPow: {api_estimated_power}"
+        )
 
         # Fallback logic if actual_kw is missing
         actual_kw = actual_kw or api_charging_power
@@ -423,6 +460,8 @@ def vehicle_status():
                 "trunk": bool(vehicle.trunk_is_open),
                 "hood": bool(vehicle.hood_is_open)
             }
+                "hood": bool(vehicle.hood_is_open),
+            },
         }
 
         return jsonify(resp), 200
@@ -430,9 +469,14 @@ def vehicle_status():
     except Exception as e:
         logger.error(f"Error in /status: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        logger.error(f"Error in /status: {exc}", exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
 
 # ── Lock Status Endpoint ──
 @app.route('/lock_status', methods=['GET'])
+@app.route("/lock_status", methods=["GET"])
 @require_auth
 def lock_status():
     """Get vehicle lock status."""
@@ -449,9 +493,14 @@ def lock_status():
     except Exception as e:
         logger.error(f"Error in /lock_status: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        logger.error(f"Error in /lock_status: {exc}", exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
 
 # ── Unlock Car Endpoint ──
 @app.route('/unlock_car', methods=['POST'])
+@app.route("/unlock_car", methods=["POST"])
 @require_auth
 def unlock_car():
     """Unlock the vehicle."""
@@ -468,9 +517,14 @@ def unlock_car():
     except Exception as e:
         logger.error(f"Error in /unlock_car: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        logger.error(f"Error in /unlock_car: {exc}", exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
 
 # ── Lock Car Endpoint ──
 @app.route('/lock_car', methods=['POST'])
+@app.route("/lock_car", methods=["POST"])
 @require_auth
 def lock_car():
     """Lock the vehicle."""
@@ -487,9 +541,14 @@ def lock_car():
     except Exception as e:
         logger.error(f"Error in /lock_car: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        logger.error(f"Error in /lock_car: {exc}", exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
 
 # ── Start Climate Endpoint ──
 @app.route('/start_climate', methods=['POST'])
+@app.route("/start_climate", methods=["POST"])
 @require_auth
 def start_climate():
     """Start climate control."""
@@ -515,11 +574,7 @@ def start_climate():
             if not 5 <= duration <= 30:  # Reasonable duration range
                 return jsonify({"error": "Duration must be between 5-30 minutes"}), 400
         except (ValueError, TypeError):
-            return jsonify({"error": "Invalid duration value"}), 400
-
-        # Validate seat heating levels (0-3)
-        for seat in ["front_left_seat", "front_right_seat", "rear_left_seat", "rear_right_seat"]:
-            try:
+@@ -415,98 +483,103 @@ def start_climate():
                 level = int(data.get(seat, 0))
                 if not 0 <= level <= 3:
                     return jsonify({"error": f"{seat} must be between 0-3"}), 400
@@ -546,6 +601,7 @@ def start_climate():
             rear_left_seat=int(data.get("rear_left_seat", 0)),
             rear_right_seat=int(data.get("rear_right_seat", 0)),
             steering_wheel=steering
+            steering_wheel=steering,
         )
 
         result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
@@ -555,9 +611,14 @@ def start_climate():
     except Exception as e:
         logger.error(f"Error in /start_climate: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        logger.error(f"Error in /start_climate: {exc}", exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
 
 # ── Stop Climate Endpoint ──
 @app.route('/stop_climate', methods=['POST'])
+@app.route("/stop_climate", methods=["POST"])
 @require_auth
 def stop_climate():
     """Stop climate control."""
@@ -574,9 +635,14 @@ def stop_climate():
     except Exception as e:
         logger.error(f"Error in /stop_climate: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        logger.error(f"Error in /stop_climate: {exc}", exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
 
 # ── Debug Vehicle Endpoint ──
 @app.route('/debug_vehicle', methods=['POST'])
+@app.route("/debug_vehicle", methods=["POST"])
 @require_auth
 def debug_vehicle():
     """Debug endpoint to view raw vehicle data."""
@@ -601,6 +667,10 @@ def debug_vehicle():
     except Exception as e:
         logger.error(f"Error in /debug_vehicle: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        logger.error(f"Error in /debug_vehicle: {exc}", exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
 
 # ── Error Handlers ──
 @app.errorhandler(404)
@@ -608,11 +678,13 @@ def not_found(e):
     """Handle 404 errors."""
     return jsonify({"error": "Endpoint not found"}), 404
 
+
 @app.errorhandler(500)
 def internal_error(e):
     """Handle 500 errors."""
     logger.error(f"Internal server error: {e}", exc_info=True)
     return jsonify({"error": "Internal server error"}), 500
+
 
 # ── Main Entry Point ──
 if __name__ == "__main__":
