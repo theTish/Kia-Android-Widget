@@ -161,23 +161,31 @@ def init_vehicle_manager():
                 # Try to make a direct request to see what we get
                 logger.info("Attempting direct API call to diagnose...")
                 try:
+                    import copy
                     import requests
                     test_url = "https://prd.ca-cwp.kia.com/api/v2/login"
                     test_data = {"username": USERNAME, "password": PASSWORD}
-
-                    # Mirror the base URL used by hyundai_kia_connect_api for consistency
-                    base_url_by_region = {
-                        2: "https://kiaconnect.ca/tods/api/",  # Canada
-                        3: "https://api.kiaamerica.com/tods/api/",  # USA
-                        1: "https://prd.eu-ccapi.kia.com:8080/api/v1/",  # Europe
-                        5: "https://prd.au-ccapi.kia.com/api/v1/",  # Australia
-                    }
-                    test_url = base_url_by_region.get(REGION, "https://kiaconnect.ca/tods/api/") + "v2/login"
-                    test_data = {"loginId": USERNAME, "password": PASSWORD}
                     test_headers = {"Content-Type": "application/json"}
+
+                    api = vehicle_manager.api
+                    test_url = api.API_URL + "v2/login"
+
+                    # Mirror the same headers the library sends to avoid validation errors
+                    test_headers = copy.deepcopy(getattr(api, "API_HEADERS", {}))
+                    test_headers.pop("accessToken", None)
+
+                    test_data = {"loginId": USERNAME, "password": PASSWORD}
+
                     test_response = requests.post(test_url, json=test_data, headers=test_headers, timeout=10)
                     logger.info(f"Direct API test - Status: {test_response.status_code}")
                     logger.info(f"Direct API test - Headers: {dict(test_response.headers)}")
+                    logger.info(
+                        "Direct API test - Status: %s | URL: %s | Headers sent: %s",
+                        test_response.status_code,
+                        test_url,
+                        {k: v for k, v in test_headers.items() if k.lower() != "client_secret"},
+                    )
+                    logger.info(f"Direct API test - Response headers: {dict(test_response.headers)}")
                     logger.info(f"Direct API test - Body (first 500 chars): {test_response.text[:500]}")
                 except Exception as test_error:
                     logger.error(f"Direct API test failed: {test_error}")
