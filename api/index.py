@@ -57,13 +57,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def _trimmed_env(name: str):
+    raw = os.environ.get(name)
+    if raw is None:
+        return None
+
+    trimmed = raw.strip()
+    if trimmed != raw:
+        logger.warning(f"{name} contained surrounding whitespace. Trimming it before use.")
+
+    return trimmed or None
+
+
 # ── Environment Variables ──
-USERNAME = os.environ.get('KIA_USERNAME')
-PASSWORD = os.environ.get('KIA_PASSWORD')
-PIN = os.environ.get('KIA_PIN')  # Keep as string to preserve leading zeros
-SECRET_KEY = os.environ.get("SECRET_KEY")
+USERNAME = _trimmed_env('KIA_USERNAME')
+PASSWORD = _trimmed_env('KIA_PASSWORD')
+PIN = _trimmed_env('KIA_PIN')  # Keep as string to preserve leading zeros
+SECRET_KEY = _trimmed_env("SECRET_KEY")
 BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH") or DEFAULT_BATTERY_CAPACITY_KWH)
-REGION = int(os.environ.get("KIA_REGION") or DEFAULT_REGION)
 region_env_raw = os.environ.get("KIA_REGION")
 region_env = region_env_raw.strip() if region_env_raw else None
 if region_env:
@@ -119,7 +130,6 @@ def init_vehicle_manager():
             from hyundai_kia_connect_api import VehicleManager
             from hyundai_kia_connect_api.exceptions import AuthenticationError
 
-            logger.info(f"Initializing Vehicle Manager (Region: {REGION}, Brand: {BRAND_KIA})...")
             logger.info(
                 f"Initializing Vehicle Manager (Region: {REGION} ({REGION_CODES.get(REGION, 'Unknown')}), "
                 f"Brand: {BRAND_KIA})..."
@@ -163,9 +173,6 @@ def init_vehicle_manager():
                 try:
                     import copy
                     import requests
-                    test_url = "https://prd.ca-cwp.kia.com/api/v2/login"
-                    test_data = {"username": USERNAME, "password": PASSWORD}
-                    test_headers = {"Content-Type": "application/json"}
 
                     api = vehicle_manager.api
                     test_url = api.API_URL + "v2/login"
@@ -177,8 +184,6 @@ def init_vehicle_manager():
                     test_data = {"loginId": USERNAME, "password": PASSWORD}
 
                     test_response = requests.post(test_url, json=test_data, headers=test_headers, timeout=10)
-                    logger.info(f"Direct API test - Status: {test_response.status_code}")
-                    logger.info(f"Direct API test - Headers: {dict(test_response.headers)}")
                     logger.info(
                         "Direct API test - Status: %s | URL: %s | Headers sent: %s",
                         test_response.status_code,
