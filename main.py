@@ -8,15 +8,15 @@ from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
 from hyundai_kia_connect_api.exceptions import AuthenticationError
 
 # ── Constants ──
-REGION_NORTH_AMERICA = 2
-DEFAULT_REGION = 2  # Canada
 REGION_CODES = {
     1: "Europe",
     2: "Canada",
     3: "USA",
     4: "China",
-    5: "Australia"
+    5: "Australia",
 }
+# Region codes: 1=Europe, 2=Canada, 3=USA, 4=China, 5=Australia
+DEFAULT_REGION = 2  # Canada
 BRAND_KIA = 1
 DEFAULT_BATTERY_CAPACITY_KWH = 77.4
 CACHE_TTL_SECONDS = 30
@@ -41,6 +41,7 @@ PASSWORD = os.environ.get('KIA_PASSWORD')
 PIN = os.environ.get('KIA_PIN')  # Keep as string to preserve leading zeros
 SECRET_KEY = os.environ.get("SECRET_KEY")
 BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH") or DEFAULT_BATTERY_CAPACITY_KWH)
+REGION = int(os.environ.get("KIA_REGION") or DEFAULT_REGION)
 region_env_raw = os.environ.get("KIA_REGION")
 region_env = region_env_raw.strip() if region_env_raw else None
 if region_env:
@@ -55,26 +56,110 @@ if region_env:
 else:
     REGION = DEFAULT_REGION
 
-if USERNAME is None or PASSWORD is None or PIN is None:
-    raise ValueError("Missing credentials! Check KIA_USERNAME, KIA_PASSWORD, and KIA_PIN environment variables.")
-
-if not SECRET_KEY:
-    raise ValueError("Missing SECRET_KEY environment variable.")
-
 # Debug: Log PIN length (not the actual PIN for security)
-logger.info(f"KIA_PIN length: {len(PIN)} characters")
+if PIN:
+    logger.info(f"KIA_PIN length: {len(PIN)} characters")
 
-# ── Initialize Vehicle Manager ──
-logger.info(f"Using region {REGION} ({REGION_CODES.get(REGION, 'Unknown')})")
+# ── Global state ──
+vehicle_manager = None
+VEHICLE_ID = None
+vehicle_state_cache = {
+    "last_update": None,
+    "data": None
+}
+rate_limit_store = {}
 
-vehicle_manager = VehicleManager(
-    region=REGION_NORTH_AMERICA,
-    region=REGION,
-    brand=BRAND_KIA,
-    username=USERNAME,
-    password=PASSWORD,
-    pin=str(PIN)  # Convert to string to preserve leading zeros
-)
+def init_vehicle_manager():
+    """Initialize vehicle manager lazily on first request."""
+    global vehicle_manager, VEHICLE_ID
+
+    # If already initialized, return success
+    if vehicle_manager is not None and VEHICLE_ID is not None:
+        return True
+
+    # If vehicle_manager exists but VEHICLE_ID is None, force re-initialization
+    if vehicle_manager is not None and VEHICLE_ID is None:
+        logger.warning("Vehicle manager exists but VEHICLE_ID is None. Forcing re-initialization...")
+        vehicle_manager = None
+
+    # Check credentials first
+    if USERNAME is None or PASSWORD is None or PIN is None:
+        logger.error("Missing credentials! Check KIA_USERNAME, KIA_PASSWORD, and KIA_PIN environment variables.")
+        return False
+
+    if not SECRET_KEY:
+        logger.error("Missing SECRET_KEY environment variable.")
+        return False
+
+    try:
+        # Initialize using VehicleManager exactly like working main.py
+        if vehicle_manager is None:
+            from hyundai_kia_connect_api import VehicleManager
+            from hyundai_kia_connect_api.exceptions import AuthenticationError
+
+            logger.info(f"Initializing Vehicle Manager (Region: {REGION}, Brand: {BRAND_KIA})...")
+            logger.info(
+                f"Initializing Vehicle Manager (Region: {REGION} ({REGION_CODES.get(REGION, 'Unknown')}), "
+                f"Brand: {BRAND_KIA})..."
+            )
+            logger.info(f"Using PIN with length: {len(PIN)} characters")
+
+            vehicle_manager = VehicleManager(
+                region=REGION,
+                brand=BRAND_KIA,
+                username=USERNAME,
+                password=PASSWORD,
+                pin=str(PIN)
+            )
+
+            logger.info("Attempting to authenticate and refresh token...")
+
+            # Temporarily monkey-patch the API to log the raw response
+            original_login = vehicle_manager.api.login
+            def logged_login(username, password):
+                import requests
+                # Call the original login but catch the error to log the response
+                try:
+                    return original_login(username, password)
+                except Exception as e:
+                    # Try to get the last response from the session
+                    if hasattr(vehicle_manager.api, 'sessions'):
+                        logger.error(f"Login failed. Checking session history...")
+                        # The error happened during response.json(), so the response object might still be accessible
+                    logger.error(f"Login exception: {e}")
+                    raise
+
+            vehicle_manager.api.login = logged_login
+
+            try:
+                vehicle_manager.check_and_refresh_token()
+                logger.info("Token refreshed successfully.")
+            except Exception as auth_error:
+                logger.error(f"Authentication error: {auth_error}")
+                # Try to make a direct request to see what we get
+                logger.info("Attempting direct API call to diagnose...")
+                try:
+                    import requests
+                    test_url = "https://prd.ca-cwp.kia.com/api/v2/login"
+                    test_data = {"username": USERNAME, "password": PASSWORD}
+
+                    # Mirror the base URL used by hyundai_kia_connect_api for consistency
+                    base_url_by_region = {
+                        2: "https://kiaconnect.ca/tods/api/",  # Canada
+                        3: "https://api.kiaamerica.com/tods/api/",  # USA
+                        1: "https://prd.eu-ccapi.kia.com:8080/api/v1/",  # Europe
+                        5: "https://prd.au-ccapi.kia.com/api/v1/",  # Australia
+                    }
+                    test_url = base_url_by_region.get(REGION, "https://kiaconnect.ca/tods/api/") + "v2/login"
+                    test_data = {"loginId": USERNAME, "password": PASSWORD}
+                    test_headers = {"Content-Type": "application/json"}
+                    test_response = requests.post(test_url, json=test_data, headers=test_headers, timeout=10)
+                    logger.info(f"Direct API test - Status: {test_response.status_code}")
+                    logger.info(f"Direct API test - Headers: {dict(test_response.headers)}")
+                    logger.info(f"Direct API test - Body (first 500 chars): {test_response.text[:500]}")
+                except Exception as test_error:
+                    logger.error(f"Direct API test failed: {test_error}")
+                raise
 
 # ── Authenticate and Initialize ──
 try:
