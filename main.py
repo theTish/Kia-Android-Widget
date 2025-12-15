@@ -1,4 +1,3 @@
-
 import os
 import logging
 from functools import wraps
@@ -10,6 +9,14 @@ from hyundai_kia_connect_api.exceptions import AuthenticationError
 
 # ── Constants ──
 REGION_NORTH_AMERICA = 2
+DEFAULT_REGION = 2  # Canada
+REGION_CODES = {
+    1: "Europe",
+    2: "Canada",
+    3: "USA",
+    4: "China",
+    5: "Australia"
+}
 BRAND_KIA = 1
 DEFAULT_BATTERY_CAPACITY_KWH = 77.4
 CACHE_TTL_SECONDS = 30
@@ -34,6 +41,19 @@ PASSWORD = os.environ.get('KIA_PASSWORD')
 PIN = os.environ.get('KIA_PIN')  # Keep as string to preserve leading zeros
 SECRET_KEY = os.environ.get("SECRET_KEY")
 BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH") or DEFAULT_BATTERY_CAPACITY_KWH)
+region_env_raw = os.environ.get("KIA_REGION")
+region_env = region_env_raw.strip() if region_env_raw else None
+if region_env:
+    try:
+        REGION = int(region_env)
+        if REGION not in REGION_CODES:
+            raise ValueError
+    except ValueError:
+        raise ValueError(
+            f"Invalid KIA_REGION '{region_env_raw}'. Valid options are: {sorted(REGION_CODES.keys())}"
+        )
+else:
+    REGION = DEFAULT_REGION
 
 if USERNAME is None or PASSWORD is None or PIN is None:
     raise ValueError("Missing credentials! Check KIA_USERNAME, KIA_PASSWORD, and KIA_PIN environment variables.")
@@ -45,8 +65,11 @@ if not SECRET_KEY:
 logger.info(f"KIA_PIN length: {len(PIN)} characters")
 
 # ── Initialize Vehicle Manager ──
+logger.info(f"Using region {REGION} ({REGION_CODES.get(REGION, 'Unknown')})")
+
 vehicle_manager = VehicleManager(
     region=REGION_NORTH_AMERICA,
+    region=REGION,
     brand=BRAND_KIA,
     username=USERNAME,
     password=PASSWORD,
