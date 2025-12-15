@@ -189,6 +189,10 @@ def init_vehicle_manager():
                     logger.info(f"Direct API test - Body (first 500 chars): {test_response.text[:500]}")
                 except Exception as test_error:
                     logger.error(f"Direct API test failed: {test_error}")
+
+                # Reset state so the next request attempts a clean initialization
+                vehicle_manager = None
+                VEHICLE_ID = None
                 raise
 
             logger.info("Updating vehicle states...")
@@ -230,6 +234,8 @@ def init_vehicle_manager():
         return True
     except Exception as e:
         logger.error(f"Failed to initialize vehicle manager: {e}")
+        vehicle_manager = None
+        VEHICLE_ID = None
         import traceback
         traceback.print_exc()
         return False
