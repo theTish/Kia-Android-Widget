@@ -30,6 +30,13 @@ def custom_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
 socket.getaddrinfo = custom_getaddrinfo
 
 # ── Constants ──
+REGION_CODES = {
+    1: "Europe",
+    2: "Canada",
+    3: "USA",
+    4: "China",
+    5: "Australia",
+}
 # Region codes: 1=Europe, 2=Canada, 3=USA, 4=China, 5=Australia
 DEFAULT_REGION = 2  # Canada
 BRAND_KIA = 1
@@ -57,6 +64,19 @@ PIN = os.environ.get('KIA_PIN')  # Keep as string to preserve leading zeros
 SECRET_KEY = os.environ.get("SECRET_KEY")
 BATTERY_CAPACITY_KWH = float(os.environ.get("BATTERY_CAPACITY_KWH") or DEFAULT_BATTERY_CAPACITY_KWH)
 REGION = int(os.environ.get("KIA_REGION") or DEFAULT_REGION)
+region_env_raw = os.environ.get("KIA_REGION")
+region_env = region_env_raw.strip() if region_env_raw else None
+if region_env:
+    try:
+        REGION = int(region_env)
+        if REGION not in REGION_CODES:
+            raise ValueError
+    except ValueError:
+        raise ValueError(
+            f"Invalid KIA_REGION '{region_env_raw}'. Valid options are: {sorted(REGION_CODES.keys())}"
+        )
+else:
+    REGION = DEFAULT_REGION
 
 # Debug: Log PIN length (not the actual PIN for security)
 if PIN:
@@ -100,6 +120,10 @@ def init_vehicle_manager():
             from hyundai_kia_connect_api.exceptions import AuthenticationError
 
             logger.info(f"Initializing Vehicle Manager (Region: {REGION}, Brand: {BRAND_KIA})...")
+            logger.info(
+                f"Initializing Vehicle Manager (Region: {REGION} ({REGION_CODES.get(REGION, 'Unknown')}), "
+                f"Brand: {BRAND_KIA})..."
+            )
             logger.info(f"Using PIN with length: {len(PIN)} characters")
 
             vehicle_manager = VehicleManager(
@@ -140,6 +164,16 @@ def init_vehicle_manager():
                     import requests
                     test_url = "https://prd.ca-cwp.kia.com/api/v2/login"
                     test_data = {"username": USERNAME, "password": PASSWORD}
+
+                    # Mirror the base URL used by hyundai_kia_connect_api for consistency
+                    base_url_by_region = {
+                        2: "https://kiaconnect.ca/tods/api/",  # Canada
+                        3: "https://api.kiaamerica.com/tods/api/",  # USA
+                        1: "https://prd.eu-ccapi.kia.com:8080/api/v1/",  # Europe
+                        5: "https://prd.au-ccapi.kia.com/api/v1/",  # Australia
+                    }
+                    test_url = base_url_by_region.get(REGION, "https://kiaconnect.ca/tods/api/") + "v2/login"
+                    test_data = {"loginId": USERNAME, "password": PASSWORD}
                     test_headers = {"Content-Type": "application/json"}
                     test_response = requests.post(test_url, json=test_data, headers=test_headers, timeout=10)
                     logger.info(f"Direct API test - Status: {test_response.status_code}")
