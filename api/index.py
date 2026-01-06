@@ -132,16 +132,14 @@ def init_vehicle_manager():
 
             # Temporarily monkey-patch the API to log the raw response
             original_login = vehicle_manager.api.login
-            def logged_login(username, password):
-                import requests
+            def logged_login(username, password, **kwargs):
                 # Call the original login but catch the error to log the response
+                # **kwargs needed for v3.52.1+ which passes otp_handler
                 try:
-                    return original_login(username, password)
+                    return original_login(username, password, **kwargs)
                 except Exception as e:
-                    # Try to get the last response from the session
                     if hasattr(vehicle_manager.api, 'sessions'):
                         logger.error(f"Login failed. Checking session history...")
-                        # The error happened during response.json(), so the response object might still be accessible
                     logger.error(f"Login exception: {e}")
                     raise
 
