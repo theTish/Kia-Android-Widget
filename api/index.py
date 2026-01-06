@@ -108,6 +108,11 @@ def init_vehicle_manager():
         if vehicle_manager is None:
             from hyundai_kia_connect_api import VehicleManager
             from hyundai_kia_connect_api.exceptions import AuthenticationError
+            import hyundai_kia_connect_api
+
+            # Log library version for debugging
+            lib_version = getattr(hyundai_kia_connect_api, '__version__', 'unknown')
+            logger.info(f"hyundai_kia_connect_api version: {lib_version}")
 
             logger.info(
                 f"Initializing Vehicle Manager (Region: {REGION} ({REGION_CODES.get(REGION, 'Unknown')}), "
@@ -151,6 +156,8 @@ def init_vehicle_manager():
                 logger.info("Attempting direct API call to diagnose...")
                 try:
                     import copy
+                    import uuid
+                    import base64
                     import requests
 
                     api = vehicle_manager.api
@@ -160,14 +167,24 @@ def init_vehicle_manager():
                     test_headers = copy.deepcopy(getattr(api, "API_HEADERS", {}))
                     test_headers.pop("accessToken", None)
 
+                    # Generate Deviceid like the library does (required for Canada since July 2025)
+                    base_device_id = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.102 Mobile Safari/537.36"
+                    unique_device_id = f"{base_device_id}+{str(uuid.uuid4())}"
+                    test_headers["Deviceid"] = base64.b64encode(unique_device_id.encode()).decode()
+
                     test_data = {"loginId": USERNAME, "password": PASSWORD}
+
+                    # Log headers (excluding secrets) to verify Deviceid is present
+                    safe_headers = {k: (v[:20] + "..." if k == "Deviceid" else v)
+                                   for k, v in test_headers.items()
+                                   if k.lower() != "client_secret"}
+                    logger.info(f"Direct API test - Headers with Deviceid: {safe_headers}")
 
                     test_response = requests.post(test_url, json=test_data, headers=test_headers, timeout=10)
                     logger.info(
-                        "Direct API test - Status: %s | URL: %s | Headers sent: %s",
+                        "Direct API test - Status: %s | URL: %s",
                         test_response.status_code,
                         test_url,
-                        {k: v for k, v in test_headers.items() if k.lower() != "client_secret"},
                     )
                     logger.info(f"Direct API test - Response headers: {dict(test_response.headers)}")
                     logger.info(f"Direct API test - Body (first 500 chars): {test_response.text[:500]}")
