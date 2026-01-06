@@ -11,3 +11,9 @@ dependencies = [
     "tzdata>=2023.3",
     "gunicorn>=21.2.0",
 ]
+
+[tool.uv]
+# Exclude the PyPI 'uuid' package - it's Python 2 only and conflicts with
+# Python 3's built-in uuid module. hyundai-kia-connect-api incorrectly lists
+# it as a dependency but actually uses the stdlib uuid.
+override-dependencies = ["uuid ; python_version < '2'"]
