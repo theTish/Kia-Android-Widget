@@ -172,6 +172,11 @@ def init_vehicle_manager():
                     unique_device_id = f"{base_device_id}+{str(uuid.uuid4())}"
                     test_headers["Deviceid"] = base64.b64encode(unique_device_id.encode()).decode()
 
+                    # Add User-Agent header (the library sends this but API_HEADERS may not include it)
+                    test_headers["User-Agent"] = base_device_id
+                    # Use CWP instead of SPA for login (library uses CWP)
+                    test_headers["from"] = "CWP"
+
                     test_data = {"loginId": USERNAME, "password": PASSWORD}
 
                     # Log headers (excluding secrets) to verify Deviceid is present
