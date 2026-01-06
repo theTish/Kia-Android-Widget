@@ -469,9 +469,9 @@ def vehicle_status():
 
         # ── Response ──
         resp = {
-            "battery_percentage": int(pct),
-            "battery_12v": int(vehicle.car_battery_percentage),
-            "charge_duration": int(dur),
+            "battery_percentage": int(pct) if pct is not None else None,
+            "battery_12v": int(vehicle.car_battery_percentage) if vehicle.car_battery_percentage is not None else None,
+            "charge_duration": int(dur) if dur is not None else 0,
             "charging_eta": eta_time,
             "charging_duration_formatted": eta_duration,
             "estimated_charging_power_kw": estimated_kw,
@@ -479,15 +479,15 @@ def vehicle_status():
             "target_charge_limit": limit,
             "is_charging": charging,
             "plugged_in": plugged_in,
-            "is_locked": bool(vehicle.is_locked),
-            "engine_running": bool(vehicle.engine_is_running),
+            "is_locked": bool(vehicle.is_locked) if vehicle.is_locked is not None else None,
+            "engine_running": bool(vehicle.engine_is_running) if vehicle.engine_is_running is not None else None,
             "doors": {
-                "front_left": bool(int(vehicle.front_left_door_is_open)),
-                "front_right": bool(int(vehicle.front_right_door_is_open)),
-                "back_left": bool(int(vehicle.back_left_door_is_open)),
-                "back_right": bool(int(vehicle.back_right_door_is_open)),
-                "trunk": bool(vehicle.trunk_is_open),
-                "hood": bool(vehicle.hood_is_open)
+                "front_left": bool(int(vehicle.front_left_door_is_open)) if vehicle.front_left_door_is_open is not None else None,
+                "front_right": bool(int(vehicle.front_right_door_is_open)) if vehicle.front_right_door_is_open is not None else None,
+                "back_left": bool(int(vehicle.back_left_door_is_open)) if vehicle.back_left_door_is_open is not None else None,
+                "back_right": bool(int(vehicle.back_right_door_is_open)) if vehicle.back_right_door_is_open is not None else None,
+                "trunk": bool(vehicle.trunk_is_open) if vehicle.trunk_is_open is not None else None,
+                "hood": bool(vehicle.hood_is_open) if vehicle.hood_is_open is not None else None
             }
         }
 
