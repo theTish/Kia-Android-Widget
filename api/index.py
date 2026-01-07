@@ -556,11 +556,45 @@ def lock_car():
         logger.error(f"Error in /lock_car: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+# ── Climate Presets ──
+CLIMATE_PRESETS = {
+    "winter": {
+        "set_temp": 21,
+        "defrost": True,
+        "steering_wheel": 1,  # On
+        "front_left_seat": 3,  # Driver - High
+        "front_right_seat": 3,  # Passenger - High
+        "rear_left_seat": 0,
+        "rear_right_seat": 0,
+        "heating": 1,
+    },
+    "summer": {
+        "set_temp": 21,
+        "defrost": False,
+        "steering_wheel": 0,  # Off
+        "front_left_seat": 0,
+        "front_right_seat": 0,
+        "rear_left_seat": 0,
+        "rear_right_seat": 0,
+        "heating": 0,
+    },
+    "springfall": {
+        "set_temp": 21,
+        "defrost": False,
+        "steering_wheel": 0,  # Off
+        "front_left_seat": 0,
+        "front_right_seat": 0,
+        "rear_left_seat": 0,
+        "rear_right_seat": 0,
+        "heating": 0,
+    },
+}
+
 # ── Start Climate Endpoint ──
 @app.route('/start_climate', methods=['POST'])
 @require_auth
 def start_climate():
-    """Start climate control."""
+    """Start climate control with optional seasonal presets."""
     logger.info("Received request to /start_climate")
 
     try:
@@ -571,6 +605,22 @@ def start_climate():
 
         data = request.get_json() or {}
         logger.info(f"Incoming payload: {data}")
+
+        # ── Check for preset ──
+        preset = data.get("preset", "").lower()
+        if preset:
+            if preset not in CLIMATE_PRESETS:
+                return jsonify({
+                    "error": f"Invalid preset '{preset}'. Valid options: {list(CLIMATE_PRESETS.keys())}"
+                }), 400
+            # Use preset values, but allow overrides from request
+            preset_values = CLIMATE_PRESETS[preset].copy()
+            logger.info(f"Using preset '{preset}': {preset_values}")
+            # Merge with any explicit overrides from request (except 'preset' itself)
+            for key in preset_values:
+                if key in data:
+                    preset_values[key] = data[key]
+            data = preset_values
 
         # ── Input Validation ──
         try:
@@ -621,7 +671,18 @@ def start_climate():
         result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
         logger.info(f"Start climate result: {result}")
 
-        return jsonify({"status": "Climate started", "result": result}), 200
+        return jsonify({
+            "status": "Climate started",
+            "preset": preset if preset else None,
+            "settings": {
+                "temperature": set_temp,
+                "defrost": bool(data.get("defrost", False)),
+                "steering_wheel": steering,
+                "front_left_seat": int(data.get("front_left_seat", 0)),
+                "front_right_seat": int(data.get("front_right_seat", 0)),
+            },
+            "result": result
+        }), 200
     except Exception as e:
         logger.error(f"Error in /start_climate: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
