@@ -440,15 +440,38 @@ def vehicle_status():
 
         pct = vehicle.ev_battery_percentage
         dur = vehicle.ev_estimated_current_charge_duration
-        plugged_in = bool(vehicle.ev_battery_is_plugged_in)
         charging = bool(vehicle.ev_battery_is_charging)
-        limit = 100  # Default charge target
+
+        # ── Plug type detection ──
+        # 0 = not plugged, 1 = DC (fast), 2 = AC (Level 2/portable)
+        plug_type_raw = vehicle.ev_battery_is_plugged_in
+        try:
+            plug_type_int = int(plug_type_raw) if plug_type_raw is not None else 0
+        except (ValueError, TypeError):
+            plug_type_int = 0
+
+        plugged_in = plug_type_int > 0
+        plug_type_map = {0: None, 1: "DC", 2: "AC"}
+        plug_type = plug_type_map.get(plug_type_int, None)
+
+        # ── Charge limits ──
+        charge_limit_ac = vehicle.ev_charge_limits_ac
+        charge_limit_dc = vehicle.ev_charge_limits_dc
+
+        # Active limit based on plug type
+        if plug_type_int == 1:  # DC
+            active_charge_limit = charge_limit_dc
+        elif plug_type_int == 2:  # AC
+            active_charge_limit = charge_limit_ac
+        else:  # Not plugged in - show AC limit as default
+            active_charge_limit = charge_limit_ac
 
         # ── Estimate charging power ──
         estimated_kw = None
-        if charging and dur > 0 and pct < limit:
-            fraction = (limit - pct) / 100
-            estimated_kw = round((BATTERY_CAPACITY_KWH * fraction) / (dur / 60), 1)
+        if charging and dur and dur > 0 and pct is not None and active_charge_limit:
+            if pct < active_charge_limit:
+                fraction = (active_charge_limit - pct) / 100
+                estimated_kw = round((BATTERY_CAPACITY_KWH * fraction) / (dur / 60), 1)
 
         actual_kw = None
         try:
@@ -460,7 +483,7 @@ def vehicle_status():
 
         # ── ETA Calculation ──
         eta_time = eta_duration = None
-        if charging and dur > 0:
+        if charging and dur and dur > 0:
             now = datetime.now(ZoneInfo("America/Toronto"))
             eta_dt = now + timedelta(minutes=dur)
             eta_time = eta_dt.strftime("%-I:%M %p")
@@ -476,9 +499,14 @@ def vehicle_status():
             "charging_duration_formatted": eta_duration,
             "estimated_charging_power_kw": estimated_kw,
             "actual_charging_power_kw": actual_kw,
-            "target_charge_limit": limit,
             "is_charging": charging,
             "plugged_in": plugged_in,
+            "plug_type": plug_type,  # "DC", "AC", or null
+            "charge_limits": {
+                "ac": charge_limit_ac,
+                "dc": charge_limit_dc,
+                "active": active_charge_limit,  # The limit that applies based on plug type
+            },
             "is_locked": bool(vehicle.is_locked) if vehicle.is_locked is not None else None,
             "engine_running": bool(vehicle.engine_is_running) if vehicle.engine_is_running is not None else None,
             "doors": {
