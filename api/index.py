@@ -580,7 +580,7 @@ CLIMATE_PRESETS = {
     },
     "springfall": {
         "set_temp": 21,
-        "defrost": True,  # On for morning dew/frost
+        "defrost": False,
         "steering_wheel": 0,  # Off
         "front_left_seat": 0,
         "front_right_seat": 0,
