@@ -626,9 +626,8 @@ def _build_climate_payload(vehicle_manager, vehicle_id, options):
     The library's Canada implementation is missing this section.
     """
 
-    api = vehicle_manager.api
     vehicle = vehicle_manager.get_vehicle(vehicle_id)
-    token = api.token
+    token = vehicle_manager.token  # Token is on vehicle_manager, not api
 
     # Convert temperature to hex format (library does this internally)
     # Formula: hex(temp * 2) with padding - e.g., 21°C -> 0x2A -> "2A"
@@ -686,7 +685,7 @@ def _start_climate_custom(vehicle_manager, vehicle_id, options):
     import requests
 
     api = vehicle_manager.api
-    token = api.token
+    token = vehicle_manager.token  # Token is on vehicle_manager, not api
 
     payload, is_ev = _build_climate_payload(vehicle_manager, vehicle_id, options)
 
