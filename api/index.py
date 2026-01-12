@@ -1,4 +1,5 @@
 import os
+import copy
 import logging
 from functools import wraps
 from datetime import datetime, timedelta
@@ -608,7 +609,7 @@ CLIMATE_PRESETS = {
     },
     "springfall": {
         "set_temp": 21,
-        "defrost": False,
+        "defrost": True,  # On for morning dew/frost
         "steering_wheel": 0,  # Off
         "front_left_seat": 0,
         "front_right_seat": 0,
@@ -617,6 +618,101 @@ CLIMATE_PRESETS = {
         "heating": 0,
     },
 }
+
+# ── Custom Climate Start (with steering wheel & seat heater fix) ──
+def _build_climate_payload(vehicle_manager, vehicle_id, options):
+    """
+    Build climate payload with heatingAccessory for steering wheel.
+    The library's Canada implementation is missing this section.
+    """
+
+    api = vehicle_manager.api
+    vehicle = vehicle_manager.get_vehicle(vehicle_id)
+    token = api.token
+
+    # Convert temperature to hex format (library does this internally)
+    # Formula: hex(temp * 2) with padding - e.g., 21°C -> 0x2A -> "2A"
+    hex_temp = hex(int(options.set_temp * 2))[2:].upper().zfill(2)
+
+    # Build the climate settings
+    climate_settings = {
+        "airCtrl": 1 if options.climate else 0,
+        "defrost": options.defrost,
+        "heating1": options.heating if options.heating else 0,
+        "airTemp": {
+            "value": hex_temp,
+            "unit": 0,
+            "hvacTempType": 1,
+        },
+        "igniOnDuration": options.duration,
+        "seatHeaterVentCMD": {
+            "drvSeatOptCmd": options.front_left_seat or 0,
+            "astSeatOptCmd": options.front_right_seat or 0,
+            "rlSeatOptCmd": options.rear_left_seat or 0,
+            "rrSeatOptCmd": options.rear_right_seat or 0,
+        },
+        # Add heatingAccessory for steering wheel (missing from library's CA implementation)
+        "heatingAccessory": {
+            "steeringWheel": options.steering_wheel or 0,
+            "sideMirror": 0,
+            "rearWindow": 1 if options.defrost else 0,
+        },
+    }
+
+    # For EV vehicles, wrap in remoteControl or hvacInfo
+    # Check if vehicle is EV (has ev_battery_percentage attribute)
+    is_ev = hasattr(vehicle, 'ev_battery_percentage') and vehicle.ev_battery_percentage is not None
+
+    if is_ev:
+        # Try hvacInfo first (newer EVs like EV6)
+        payload = {
+            "pin": str(token.pin),
+            "hvacInfo": climate_settings,
+        }
+    else:
+        payload = {
+            "setting": climate_settings,
+            "pin": str(token.pin),
+        }
+
+    return payload, is_ev
+
+
+def _start_climate_custom(vehicle_manager, vehicle_id, options):
+    """
+    Custom climate start that includes heatingAccessory for steering wheel.
+    Falls back to library method if this fails.
+    """
+    import requests
+
+    api = vehicle_manager.api
+    token = api.token
+
+    payload, is_ev = _build_climate_payload(vehicle_manager, vehicle_id, options)
+
+    logger.info(f"Custom climate payload (is_ev={is_ev}): {payload}")
+
+    # Get the API URL and headers from the library
+    base_url = api.API_URL
+    headers = copy.deepcopy(api.API_HEADERS) if hasattr(api, 'API_HEADERS') else {}
+    headers["accessToken"] = token.access_token
+    headers["vehicleId"] = vehicle_id
+
+    # The endpoint for starting climate
+    if is_ev:
+        endpoint = f"{base_url}rems/evc/rfon"
+    else:
+        endpoint = f"{base_url}rems/start"
+
+    logger.info(f"Sending climate request to: {endpoint}")
+
+    response = requests.post(endpoint, json=payload, headers=headers, timeout=30)
+    logger.info(f"Climate response status: {response.status_code}")
+    logger.info(f"Climate response body: {response.text[:500]}")
+
+    response.raise_for_status()
+    return response.json()
+
 
 # ── Start Climate Endpoint ──
 @app.route('/start_climate', methods=['POST'])
@@ -696,8 +792,24 @@ def start_climate():
             steering_wheel=steering
         )
 
-        result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
-        logger.info(f"Start climate result: {result}")
+        # Try custom implementation first (includes heatingAccessory for steering wheel)
+        use_custom = data.get("use_custom", True)  # Default to custom implementation
+        result = None
+
+        if use_custom:
+            try:
+                logger.info("Attempting custom climate start with heatingAccessory...")
+                result = _start_climate_custom(vehicle_manager, VEHICLE_ID, climate_options)
+                logger.info(f"Custom climate start succeeded: {result}")
+            except Exception as custom_err:
+                logger.warning(f"Custom climate start failed: {custom_err}, falling back to library method")
+                result = None
+
+        # Fall back to library method if custom failed or not requested
+        if result is None:
+            logger.info("Using library's start_climate method...")
+            result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
+            logger.info(f"Library start_climate result: {result}")
 
         return jsonify({
             "status": "Climate started",
