@@ -95,7 +95,7 @@ otp_state = {
     "otpkey": None  # OTP key from error response
 }
 
-def manual_canada_send_otp(api, method="email"):
+def manual_canada_send_otp(method="email"):
     """
     Manually send OTP for Canada region using correct MFA flow.
 
@@ -108,10 +108,37 @@ def manual_canada_send_otp(api, method="email"):
     """
     import requests
     import time
+    import uuid
+    import base64
 
     # Use a session to preserve cookies across requests (CRITICAL!)
     session = requests.Session()
-    headers = api.API_HEADERS.copy()
+
+    # Create headers directly (same as library uses for Canada)
+    base_device_id = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.102 Mobile Safari/537.36"
+    unique_device_id = f"{base_device_id}+{str(uuid.uuid4())}"
+
+    headers = {
+        'User-Agent': base_device_id,
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-CA,en-US;q=0.8,en;q=0.5,fr;q=0.3',
+        'Accept-Encoding': 'gzip, deflate, br, zstd',
+        'Content-Type': 'application/json;charset=UTF-8',
+        'from': 'CWP',
+        'offset': '-5',
+        'language': '0',
+        'Origin': 'https://kiaconnect.ca',
+        'Connection': 'keep-alive',
+        'Referer': 'https://kiaconnect.ca/login',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'Priority': 'u=0',
+        'Pragma': 'no-cache',
+        'Cache-Control': 'no-cache',
+        'client_id': 'HATAHSPACA0232141ED9722C67715A0B',
+        'Deviceid': base64.b64encode(unique_device_id.encode()).decode()
+    }
 
     # Step 1: Login to get session cookies and xid (with retry on rate limit)
     logger.info("Step 1: Triggering login to get error 7110 and session cookies...")
@@ -653,12 +680,6 @@ def send_otp():
     """
     global vehicle_manager
 
-    # Initialize if needed (serverless instances don't persist state)
-    if vehicle_manager is None:
-        logger.info("VehicleManager not initialized, initializing now...")
-        if not init_vehicle_manager():
-            return jsonify({"error": "Failed to initialize vehicle manager"}), 503
-
     data = request.get_json() or {}
     method = data.get("method", "sms").lower()
 
@@ -670,7 +691,12 @@ def send_otp():
 
         # Check if we have library OTPRequest (USA) or manual Canada OTP context
         if otp_state.get("otp_request") is not None:
-            # USA region - use library's OTP support
+            # USA region - use library's OTP support (requires VehicleManager)
+            if vehicle_manager is None:
+                logger.info("VehicleManager not initialized, initializing now...")
+                if not init_vehicle_manager():
+                    return jsonify({"error": "Failed to initialize vehicle manager"}), 503
+
             from hyundai_kia_connect_api.ApiImpl import OTP_NOTIFY_TYPE
             notify_type = OTP_NOTIFY_TYPE.EMAIL if method == "email" else OTP_NOTIFY_TYPE.SMS
 
@@ -679,10 +705,10 @@ def send_otp():
             logger.info(f"send_otp() returned: {result}")
 
         else:
-            # Canada region - use manual MFA flow
-            # (auto-fetches xid if needed, then calls selverifmeth -> sendotp)
-            logger.info("Using manual Canada MFA flow...")
-            result = manual_canada_send_otp(vehicle_manager.api, method)
+            # Canada region - use manual MFA flow (INDEPENDENT - no VehicleManager needed!)
+            # This avoids rate limiting (error 7901) from double login
+            logger.info("Using manual Canada MFA flow (no VehicleManager init needed)...")
+            result = manual_canada_send_otp(method)
             logger.info(f"Manual send_otp() returned: {result}")
 
         otp_state["sent"] = True
