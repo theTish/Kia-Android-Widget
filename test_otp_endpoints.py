@@ -5,9 +5,9 @@ Test multiple OTP endpoint variations to find the correct one.
 import requests
 import json
 
-# Test configuration (replace with actual values from logs)
-XID = "4087542348"
-OTPKEY = "7110"
+# Test configuration (using latest values from logs)
+XID = "4087618809"  # From latest attempt
+OTPKEY = "7110"  # Not used anymore, but kept for reference
 
 BASE_URL = "https://kiaconnect.ca"
 HEADERS = {
@@ -62,7 +62,7 @@ def test_endpoint(path, with_headers=True):
     headers = HEADERS.copy()
 
     if with_headers:
-        headers["otpkey"] = OTPKEY
+        # NOTE: Not sending otpkey anymore - Canada doesn't use it
         headers["notifytype"] = "email"
         headers["xid"] = XID
 

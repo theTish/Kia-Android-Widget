@@ -97,17 +97,21 @@ otp_state = {
 
 def manual_canada_send_otp(api, method="email"):
     """
-    Manually send OTP for Canada region (library doesn't support it).
+    Manually send OTP for Canada region using correct MFA flow.
 
-    Based on USA implementation pattern.
+    Based on PR #1033: https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/pull/1033
+
+    Flow:
+    1. Login (error 7110) → get transactionId
+    2. /mfa/selverifmeth → get userInfoUuid, mfaApiCode
+    3. /mfa/sendotp → send OTP, get otpKey
     """
     import requests
 
-    # Auto-trigger authentication to get xid if missing (for stateless Vercel functions)
+    # Step 1: Ensure we have xid from initial login
     if not otp_state.get("xid"):
-        logger.info("No xid in otp_state, triggering authentication to get fresh xid...")
+        logger.info("No xid, triggering login to get error 7110...")
         try:
-            # Make direct login call to trigger error 7110 and extract xid
             login_url = "https://kiaconnect.ca/tods/api/v2/login"
             login_data = {
                 "userId": os.environ.get("KIA_EMAIL"),
@@ -115,7 +119,6 @@ def manual_canada_send_otp(api, method="email"):
             }
             login_response = requests.post(login_url, json=login_data, headers=api.API_HEADERS, timeout=10)
 
-            # Check for error 7110 and extract xid
             if login_response.status_code == 200:
                 response_json = login_response.json()
                 error_code = response_json.get("error", {}).get("errorCode")
@@ -124,70 +127,137 @@ def manual_canada_send_otp(api, method="email"):
                     xid = login_response.headers.get("transactionId")
                     if xid:
                         otp_state["xid"] = xid
-                        otp_state["required"] = True
-                        otp_state["verified"] = False
-                        logger.info(f"Got fresh xid from login: {xid}")
+                        logger.info(f"Got xid from login: {xid}")
                     else:
-                        raise Exception("Error 7110 but no transactionId in headers")
+                        raise Exception("Error 7110 but no transactionId")
                 else:
                     raise Exception(f"Expected error 7110 but got: {error_code}")
             else:
-                raise Exception(f"Login failed with status {login_response.status_code}")
+                raise Exception(f"Login failed: {login_response.status_code}")
         except Exception as e:
             raise Exception(f"Failed to get xid: {e}")
 
-    if not otp_state.get("xid"):
-        raise Exception("Still missing xid after authentication attempt")
-
-    url = "https://kiaconnect.ca/tods/api/v2/cmm/sendOTP"
+    # Step 2: Select verification method to get userInfoUuid and mfaApiCode
+    logger.info("Step 2: Calling /mfa/selverifmeth to get userInfoUuid...")
+    selverif_url = "https://kiaconnect.ca/tods/api/mfa/selverifmeth"
     headers = api.API_HEADERS.copy()
-    # NOTE: Canada doesn't seem to use "otpkey" header - only xid and notifytype
-    headers["notifytype"] = "email" if method == "email" else "sms"
-    headers["xid"] = otp_state["xid"]
 
-    logger.info(f"Sending OTP via {method} to Canada API...")
-    logger.info(f"Request URL: {url}")
-    logger.info(f"Request headers (sanitized): {dict((k, v[:20] + '...' if len(str(v)) > 20 else v) for k, v in headers.items())}")
+    selverif_response = requests.post(selverif_url, json={}, headers=headers, timeout=10)
+    logger.info(f"selverifmeth response: {selverif_response.status_code}")
+    logger.info(f"Response: {selverif_response.text[:500]}")
 
-    response = requests.post(url, json={}, headers=headers, timeout=10)
-    logger.info(f"Send OTP response: {response.status_code}")
-    logger.info(f"Response headers: {dict(response.headers)}")
-    logger.info(f"Response body: {response.text[:500]}")
+    if selverif_response.status_code != 200:
+        raise Exception(f"selverifmeth failed: {selverif_response.status_code} - {selverif_response.text[:500]}")
 
-    if response.status_code != 200:
-        raise Exception(f"OTP endpoint returned {response.status_code}. Full response: {response.text[:1000]}")
+    selverif_data = selverif_response.json()
+    user_info_uuid = selverif_data.get("userInfoUuid")
+    mfa_api_code = selverif_data.get("mfaApiCode")
+    user_account = selverif_data.get("userAccount")  # Email addresses list
 
-    return response.json()
+    if not user_info_uuid or not mfa_api_code:
+        raise Exception(f"Missing userInfoUuid or mfaApiCode in response: {selverif_data}")
+
+    logger.info(f"Got userInfoUuid: {user_info_uuid[:10]}..., mfaApiCode: {mfa_api_code}")
+    otp_state["userInfoUuid"] = user_info_uuid
+    otp_state["mfaApiCode"] = mfa_api_code
+
+    # Step 3: Send OTP
+    logger.info(f"Step 3: Sending OTP via {method} to /mfa/sendotp...")
+    sendotp_url = "https://kiaconnect.ca/tods/api/mfa/sendotp"
+
+    sendotp_data = {
+        "otpMethod": "E" if method == "email" else "S",  # E=email, S=SMS
+        "mfaApiCode": mfa_api_code,
+        "userAccount": user_account,
+        "userPhone": "",  # Empty for email
+        "userInfoUuid": user_info_uuid
+    }
+
+    sendotp_response = requests.post(sendotp_url, json=sendotp_data, headers=headers, timeout=10)
+    logger.info(f"sendotp response: {sendotp_response.status_code}")
+    logger.info(f"Response: {sendotp_response.text[:500]}")
+
+    if sendotp_response.status_code != 200:
+        raise Exception(f"sendotp failed: {sendotp_response.status_code} - {sendotp_response.text[:500]}")
+
+    sendotp_result = sendotp_response.json()
+    otp_key = sendotp_result.get("otpKey")
+
+    if not otp_key:
+        raise Exception(f"Missing otpKey in response: {sendotp_result}")
+
+    logger.info(f"OTP sent! otpKey: {otp_key[:10]}...")
+    otp_state["otpKey"] = otp_key
+
+    return sendotp_result
 
 def manual_canada_verify_otp(api, otp_code):
     """
-    Manually verify OTP for Canada region (library doesn't support it).
+    Manually verify OTP for Canada region using correct MFA flow.
+
+    Flow:
+    4. /mfa/validateotp → validate code, get otpValidationKey
+    5. /mfa/genmfatkn → generate tokens (sid, rmtoken)
 
     Returns (sid, rmtoken) tuple on success.
     """
     import requests
 
-    if not otp_state.get("xid"):
-        raise Exception("Missing OTP context (xid).")
+    if not otp_state.get("otpKey"):
+        raise Exception("Missing otpKey. Call /otp/send first.")
 
-    url = "https://kiaconnect.ca/tods/api/v2/cmm/verifyOTP"
     headers = api.API_HEADERS.copy()
-    # NOTE: Canada doesn't seem to use "otpkey" header - only xid
-    headers["xid"] = otp_state["xid"]
-    data = {"otp": otp_code}
 
-    logger.info(f"Verifying OTP code...")
-    response = requests.post(url, json=data, headers=headers, timeout=10)
-    logger.info(f"Verify OTP response: {response.status_code} - {response.text[:200]}")
+    # Step 4: Validate OTP code
+    logger.info("Step 4: Validating OTP code with /mfa/validateotp...")
+    validateotp_url = "https://kiaconnect.ca/tods/api/mfa/validateotp"
 
-    response_json = response.json()
-    if response_json.get("status", {}).get("statusCode") != 0:
-        error_msg = response_json.get("status", {}).get("errorMessage", "Unknown error")
-        raise Exception(f"OTP verification failed: {error_msg}")
+    validateotp_data = {
+        "otpKey": otp_state["otpKey"],
+        "otpValue": otp_code
+    }
 
-    sid = response.headers.get("sid")
-    rmtoken = response.headers.get("rmtoken")
+    validateotp_response = requests.post(validateotp_url, json=validateotp_data, headers=headers, timeout=10)
+    logger.info(f"validateotp response: {validateotp_response.status_code}")
+    logger.info(f"Response: {validateotp_response.text[:500]}")
 
+    if validateotp_response.status_code != 200:
+        raise Exception(f"validateotp failed: {validateotp_response.status_code} - {validateotp_response.text[:500]}")
+
+    validateotp_result = validateotp_response.json()
+    otp_validation_key = validateotp_result.get("otpValidationKey")
+
+    if not otp_validation_key:
+        raise Exception(f"Missing otpValidationKey in response: {validateotp_result}")
+
+    logger.info(f"OTP validated! otpValidationKey: {otp_validation_key[:10]}...")
+
+    # Step 5: Generate MFA tokens
+    logger.info("Step 5: Generating tokens with /mfa/genmfatkn...")
+    genmfatkn_url = "https://kiaconnect.ca/tods/api/mfa/genmfatkn"
+
+    genmfatkn_data = {
+        "otpValidationKey": otp_validation_key,
+        "mfaYn": "Y",  # Y = remember device for 90 days
+        "mfaApiCode": otp_state.get("mfaApiCode")
+    }
+
+    genmfatkn_response = requests.post(genmfatkn_url, json=genmfatkn_data, headers=headers, timeout=10)
+    logger.info(f"genmfatkn response: {genmfatkn_response.status_code}")
+    logger.info(f"Response headers: {dict(genmfatkn_response.headers)}")
+    logger.info(f"Response: {genmfatkn_response.text[:500]}")
+
+    if genmfatkn_response.status_code != 200:
+        raise Exception(f"genmfatkn failed: {genmfatkn_response.status_code} - {genmfatkn_response.text[:500]}")
+
+    # Extract tokens from response headers
+    sid = genmfatkn_response.headers.get("sid")
+    rmtoken = genmfatkn_response.headers.get("rmtoken")
+
+    if not sid or not rmtoken:
+        raise Exception(f"Missing sid/rmtoken in headers: {dict(genmfatkn_response.headers)}")
+
+    logger.info("Successfully generated tokens!")
     return sid, rmtoken
 
 def init_vehicle_manager():
@@ -575,14 +645,12 @@ def send_otp():
             result = vehicle_manager.api.send_otp(otp_state["otp_request"], notify_type)
             logger.info(f"send_otp() returned: {result}")
 
-        elif otp_state.get("xid"):
-            # Canada region - use manual OTP implementation (no otpkey needed)
-            logger.info(f"Using manual Canada OTP flow - xid: {otp_state['xid']}")
+        else:
+            # Canada region - use manual MFA flow
+            # (auto-fetches xid if needed, then calls selverifmeth -> sendotp)
+            logger.info("Using manual Canada MFA flow...")
             result = manual_canada_send_otp(vehicle_manager.api, method)
             logger.info(f"Manual send_otp() returned: {result}")
-
-        else:
-            return jsonify({"error": "No OTP context available. Try calling /status first to trigger authentication"}), 400
 
         otp_state["sent"] = True
         otp_state["required"] = True
@@ -639,9 +707,9 @@ def verify_otp():
             logger.info(f"OTP verification successful! Token: {token.access_token[:20]}...")
             vehicle_manager.token = token
 
-        elif otp_state.get("xid") and otp_state.get("otpkey"):
-            # Canada region - use manual OTP verification
-            logger.info("Using manual Canada OTP verification flow...")
+        elif otp_state.get("otpKey"):
+            # Canada region - use manual MFA verification flow
+            logger.info("Using manual Canada MFA verification flow...")
             sid, rmtoken = manual_canada_verify_otp(vehicle_manager.api, otp)
             logger.info(f"OTP verified! sid: {sid[:20] if sid else None}..., rmtoken: {rmtoken[:20] if rmtoken else None}...")
 
