@@ -89,7 +89,8 @@ otp_state = {
     "required": False,
     "sent": False,
     "verified": False,
-    "error": None
+    "error": None,
+    "otp_request": None  # Stores the OTPRequest object from initial login
 }
 
 def init_vehicle_manager():
@@ -119,6 +120,7 @@ def init_vehicle_manager():
         if vehicle_manager is None:
             from hyundai_kia_connect_api import VehicleManager
             from hyundai_kia_connect_api.exceptions import AuthenticationError
+            from hyundai_kia_connect_api.ApiImpl import OTPRequest, OTP_NOTIFY_TYPE
             import hyundai_kia_connect_api
 
             # Log library version for debugging
@@ -141,41 +143,38 @@ def init_vehicle_manager():
                 # OTP is handled via send_otp() and verify_otp() methods
             )
 
-            logger.info("Attempting to authenticate and refresh token...")
+            logger.info("Attempting to authenticate...")
 
-            # Temporarily monkey-patch the API to log the raw response
-            original_login = vehicle_manager.api.login
-            def logged_login(username, password, **kwargs):
-                # Call the original login but catch the error to log the response
-                # **kwargs needed for v3.52.1+ which passes otp_handler
-                try:
-                    return original_login(username, password, **kwargs)
-                except Exception as e:
-                    if hasattr(vehicle_manager.api, 'sessions'):
-                        logger.error(f"Login failed. Checking session history...")
-                    logger.error(f"Login exception: {e}")
-                    raise
-
-            vehicle_manager.api.login = logged_login
-
-            # Try to authenticate, but don't fail initialization if OTP is required
+            # Try to authenticate - login() returns either Token or OTPRequest
             try:
-                vehicle_manager.check_and_refresh_token()
-                logger.info("Token refreshed successfully.")
-                otp_state["required"] = False
-                otp_state["verified"] = True
-            except Exception as auth_error:
-                error_msg = str(auth_error).lower()
+                login_result = vehicle_manager.login()
 
-                # Check if this is an OTP requirement (not a fatal error)
-                if "otp" in error_msg or "2fa" in error_msg or "two-factor" in error_msg:
-                    logger.warning(f"OTP/2FA required for authentication: {auth_error}")
+                # Check if OTP is required
+                if isinstance(login_result, OTPRequest):
+                    logger.warning("OTP/2FA required for authentication")
+                    logger.info(f"OTP methods available - Email: {login_result.has_email}, SMS: {login_result.has_sms}")
+                    if login_result.email:
+                        logger.info(f"OTP can be sent to email: {login_result.email}")
+                    if login_result.sms:
+                        logger.info(f"OTP can be sent to SMS: {login_result.sms}")
+
+                    # Store the OTPRequest for later use
                     otp_state["required"] = True
                     otp_state["verified"] = False
+                    otp_state["otp_request"] = login_result
                     otp_state["error"] = "OTP required - call POST /otp/send to start authentication"
-                    # Don't fail initialization - let the user complete OTP flow
+
                     logger.info("VehicleManager initialized but authentication pending OTP verification")
                     return True
+
+                # Login successful without OTP
+                logger.info("Authentication successful (no OTP required)")
+                otp_state["required"] = False
+                otp_state["verified"] = True
+                otp_state["otp_request"] = None
+
+            except Exception as auth_error:
+                logger.error(f"Authentication error: {auth_error}")
 
                 # For other errors, log but try to continue
                 logger.error(f"Authentication error (will retry on next request): {auth_error}")
@@ -445,12 +444,24 @@ def send_otp():
     if method not in ["sms", "email"]:
         return jsonify({"error": "Method must be 'sms' or 'email'"}), 400
 
+    # Check if we have an OTPRequest from the initial login
+    if otp_state.get("otp_request") is None:
+        return jsonify({"error": "No OTP request available. Try calling /status first to trigger authentication"}), 400
+
+    from hyundai_kia_connect_api.ApiImpl import OTP_NOTIFY_TYPE
+
+    # Convert method string to enum
+    if method == "email":
+        notify_type = OTP_NOTIFY_TYPE.EMAIL
+    else:
+        notify_type = OTP_NOTIFY_TYPE.SMS
+
     try:
         logger.info(f"Requesting OTP via {method}...")
-        logger.info(f"VehicleManager state - username: {vehicle_manager.username if hasattr(vehicle_manager, 'username') else 'N/A'}")
-        logger.info(f"VehicleManager has send_otp method: {hasattr(vehicle_manager, 'send_otp')}")
+        logger.info(f"OTP Request details - otp_key: {otp_state['otp_request'].otp_key[:10]}..., request_id: {otp_state['otp_request'].request_id}")
 
-        result = vehicle_manager.send_otp(method)
+        # Call send_otp with the OTPRequest object and notify type enum
+        result = vehicle_manager.api.send_otp(otp_state["otp_request"], notify_type)
         logger.info(f"send_otp() returned: {result}")
 
         otp_state["sent"] = True
@@ -491,23 +502,43 @@ def verify_otp():
     if not otp.isdigit():
         return jsonify({"error": "OTP must be numeric"}), 400
 
+    # Check if we have an OTPRequest
+    if otp_state.get("otp_request") is None:
+        return jsonify({"error": "No OTP request available. Call /otp/send first"}), 400
+
     try:
         logger.info(f"Verifying OTP code (length: {len(otp)})...")
-        vehicle_manager.verify_otp(otp)
+
+        # Call verify_otp_and_complete_login to complete the full authentication
+        token = vehicle_manager.api.verify_otp_and_complete_login(
+            username=USERNAME,
+            password=PASSWORD,
+            otp_code=otp,
+            otp_request=otp_state["otp_request"],
+            pin=PIN
+        )
+        logger.info(f"OTP verification successful! Token obtained: {token.access_token[:20]}...")
+
+        # Update the vehicle manager's token
+        vehicle_manager.token = token
         otp_state["verified"] = True
         otp_state["required"] = False
+        otp_state["otp_request"] = None
 
-        # Now try to complete authentication
-        vehicle_manager.check_and_refresh_token()
+        # Now initialize vehicles
+        logger.info("Initializing vehicles after OTP verification...")
+        vehicle_manager.initialize_vehicles()
+        vehicle_manager.update_all_vehicles_with_cached_state()
 
         return jsonify({
             "status": "OTP verified",
-            "message": "Authentication complete. You can now use the API normally."
+            "message": "Authentication complete. You can now use the API normally.",
+            "vehicles_found": len(vehicle_manager.vehicles) if vehicle_manager.vehicles else 0
         }), 200
     except Exception as e:
-        logger.error(f"Failed to verify OTP: {e}")
+        logger.error(f"Failed to verify OTP: {e}", exc_info=True)
         otp_state["error"] = str(e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "type": type(e).__name__}), 500
 
 @app.route('/otp/status', methods=['GET'])
 def otp_status():
