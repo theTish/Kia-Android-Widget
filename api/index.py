@@ -90,8 +90,64 @@ otp_state = {
     "sent": False,
     "verified": False,
     "error": None,
-    "otp_request": None  # Stores the OTPRequest object from initial login
+    "otp_request": None,  # Stores OTP data from initial login
+    "xid": None,  # Transaction ID from error response
+    "otpkey": None  # OTP key from error response
 }
+
+def manual_canada_send_otp(api, method="email"):
+    """
+    Manually send OTP for Canada region (library doesn't support it).
+
+    Based on USA implementation pattern.
+    """
+    import requests
+
+    if not otp_state.get("xid") or not otp_state.get("otpkey"):
+        raise Exception("Missing OTP context. Call /status first to trigger authentication.")
+
+    url = "https://kiaconnect.ca/tods/api/cmm/sendOTP"
+    headers = api.API_HEADERS.copy()
+    headers["otpkey"] = otp_state["otpkey"]
+    headers["notifytype"] = "email" if method == "email" else "sms"
+    headers["xid"] = otp_state["xid"]
+
+    logger.info(f"Sending OTP via {method} to Canada API...")
+    response = requests.post(url, json={}, headers=headers, timeout=10)
+    logger.info(f"Send OTP response: {response.status_code} - {response.text[:200]}")
+
+    return response.json()
+
+def manual_canada_verify_otp(api, otp_code):
+    """
+    Manually verify OTP for Canada region (library doesn't support it).
+
+    Returns (sid, rmtoken) tuple on success.
+    """
+    import requests
+
+    if not otp_state.get("xid") or not otp_state.get("otpkey"):
+        raise Exception("Missing OTP context.")
+
+    url = "https://kiaconnect.ca/tods/api/cmm/verifyOTP"
+    headers = api.API_HEADERS.copy()
+    headers["otpkey"] = otp_state["otpkey"]
+    headers["xid"] = otp_state["xid"]
+    data = {"otp": otp_code}
+
+    logger.info(f"Verifying OTP code...")
+    response = requests.post(url, json=data, headers=headers, timeout=10)
+    logger.info(f"Verify OTP response: {response.status_code} - {response.text[:200]}")
+
+    response_json = response.json()
+    if response_json.get("status", {}).get("statusCode") != 0:
+        error_msg = response_json.get("status", {}).get("errorMessage", "Unknown error")
+        raise Exception(f"OTP verification failed: {error_msg}")
+
+    sid = response.headers.get("sid")
+    rmtoken = response.headers.get("rmtoken")
+
+    return sid, rmtoken
 
 def init_vehicle_manager():
     """Initialize vehicle manager lazily on first request."""
@@ -221,6 +277,27 @@ def init_vehicle_manager():
                     )
                     logger.info(f"Direct API test - Response headers: {dict(test_response.headers)}")
                     logger.info(f"Direct API test - Body (first 500 chars): {test_response.text[:500]}")
+
+                    # Check for error 7110 (OTP required) and extract OTP context
+                    response_json = test_response.json()
+                    error_code = response_json.get("error", {}).get("errorCode")
+
+                    if error_code == "7110":
+                        logger.warning("Error 7110 detected - OTP/2FA required")
+
+                        # Extract OTP context from response headers
+                        xid = test_response.headers.get("transactionId")
+                        status_header = test_response.headers.get("status")
+
+                        if xid and status_header == "7110":
+                            otp_state["xid"] = xid
+                            otp_state["otpkey"] = status_header  # Use status as otpkey
+                            otp_state["required"] = True
+                            otp_state["verified"] = False
+                            logger.info(f"OTP context extracted - xid: {xid}, will use manual Canada OTP flow")
+                        else:
+                            logger.warning("Error 7110 but missing OTP context in headers")
+
                 except Exception as test_error:
                     logger.error(f"Direct API test failed: {test_error}")
 
@@ -444,25 +521,27 @@ def send_otp():
     if method not in ["sms", "email"]:
         return jsonify({"error": "Method must be 'sms' or 'email'"}), 400
 
-    # Check if we have an OTPRequest from the initial login
-    if otp_state.get("otp_request") is None:
-        return jsonify({"error": "No OTP request available. Try calling /status first to trigger authentication"}), 400
-
-    from hyundai_kia_connect_api.ApiImpl import OTP_NOTIFY_TYPE
-
-    # Convert method string to enum
-    if method == "email":
-        notify_type = OTP_NOTIFY_TYPE.EMAIL
-    else:
-        notify_type = OTP_NOTIFY_TYPE.SMS
-
     try:
         logger.info(f"Requesting OTP via {method}...")
-        logger.info(f"OTP Request details - otp_key: {otp_state['otp_request'].otp_key[:10]}..., request_id: {otp_state['otp_request'].request_id}")
 
-        # Call send_otp with the OTPRequest object and notify type enum
-        result = vehicle_manager.api.send_otp(otp_state["otp_request"], notify_type)
-        logger.info(f"send_otp() returned: {result}")
+        # Check if we have library OTPRequest (USA) or manual Canada OTP context
+        if otp_state.get("otp_request") is not None:
+            # USA region - use library's OTP support
+            from hyundai_kia_connect_api.ApiImpl import OTP_NOTIFY_TYPE
+            notify_type = OTP_NOTIFY_TYPE.EMAIL if method == "email" else OTP_NOTIFY_TYPE.SMS
+
+            logger.info(f"Using USA OTP flow - otp_key: {otp_state['otp_request'].otp_key[:10]}...")
+            result = vehicle_manager.api.send_otp(otp_state["otp_request"], notify_type)
+            logger.info(f"send_otp() returned: {result}")
+
+        elif otp_state.get("xid") and otp_state.get("otpkey"):
+            # Canada region - use manual OTP implementation
+            logger.info(f"Using manual Canada OTP flow - xid: {otp_state['xid']}")
+            result = manual_canada_send_otp(vehicle_manager.api, method)
+            logger.info(f"Manual send_otp() returned: {result}")
+
+        else:
+            return jsonify({"error": "No OTP context available. Try calling /status first to trigger authentication"}), 400
 
         otp_state["sent"] = True
         otp_state["required"] = True
@@ -471,7 +550,7 @@ def send_otp():
             "status": "OTP sent",
             "method": method,
             "message": f"Check your {method} for the OTP code, then call POST /otp/verify",
-            "debug": f"send_otp returned: {result}"
+            "region": "USA (library)" if otp_state.get("otp_request") else "Canada (manual)"
         }), 200
     except Exception as e:
         logger.error(f"Failed to send OTP: {e}", exc_info=True)
@@ -502,28 +581,52 @@ def verify_otp():
     if not otp.isdigit():
         return jsonify({"error": "OTP must be numeric"}), 400
 
-    # Check if we have an OTPRequest
-    if otp_state.get("otp_request") is None:
-        return jsonify({"error": "No OTP request available. Call /otp/send first"}), 400
-
     try:
         logger.info(f"Verifying OTP code (length: {len(otp)})...")
 
-        # Call verify_otp_and_complete_login to complete the full authentication
-        token = vehicle_manager.api.verify_otp_and_complete_login(
-            username=USERNAME,
-            password=PASSWORD,
-            otp_code=otp,
-            otp_request=otp_state["otp_request"],
-            pin=PIN
-        )
-        logger.info(f"OTP verification successful! Token obtained: {token.access_token[:20]}...")
+        # Check if we have library OTPRequest (USA) or manual Canada OTP context
+        if otp_state.get("otp_request") is not None:
+            # USA region - use library's OTP support
+            logger.info("Using USA OTP verification flow...")
+            token = vehicle_manager.api.verify_otp_and_complete_login(
+                username=USERNAME,
+                password=PASSWORD,
+                otp_code=otp,
+                otp_request=otp_state["otp_request"],
+                pin=PIN
+            )
+            logger.info(f"OTP verification successful! Token: {token.access_token[:20]}...")
+            vehicle_manager.token = token
 
-        # Update the vehicle manager's token
-        vehicle_manager.token = token
+        elif otp_state.get("xid") and otp_state.get("otpkey"):
+            # Canada region - use manual OTP verification
+            logger.info("Using manual Canada OTP verification flow...")
+            sid, rmtoken = manual_canada_verify_otp(vehicle_manager.api, otp)
+            logger.info(f"OTP verified! sid: {sid[:20] if sid else None}..., rmtoken: {rmtoken[:20] if rmtoken else None}...")
+
+            # Create token manually (Canada doesn't have verify_otp_and_complete_login)
+            from hyundai_kia_connect_api.ApiImpl import Token
+            from datetime import datetime, timezone, timedelta
+
+            token = Token(
+                username=USERNAME,
+                password=PASSWORD,
+                access_token=sid,
+                refresh_token=rmtoken,
+                valid_until=datetime.now(timezone.utc) + timedelta(hours=24),
+                device_id=vehicle_manager.api.device_id,
+                pin=PIN
+            )
+            vehicle_manager.token = token
+
+        else:
+            return jsonify({"error": "No OTP context available. Call /otp/send first"}), 400
+
         otp_state["verified"] = True
         otp_state["required"] = False
         otp_state["otp_request"] = None
+        otp_state["xid"] = None
+        otp_state["otpkey"] = None
 
         # Now initialize vehicles
         logger.info("Initializing vehicles after OTP verification...")
@@ -533,7 +636,8 @@ def verify_otp():
         return jsonify({
             "status": "OTP verified",
             "message": "Authentication complete. You can now use the API normally.",
-            "vehicles_found": len(vehicle_manager.vehicles) if vehicle_manager.vehicles else 0
+            "vehicles_found": len(vehicle_manager.vehicles) if vehicle_manager.vehicles else 0,
+            "region": "USA (library)" if otp_state.get("otp_request") else "Canada (manual)"
         }), 200
     except Exception as e:
         logger.error(f"Failed to verify OTP: {e}", exc_info=True)
