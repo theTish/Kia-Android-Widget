@@ -103,12 +103,12 @@ def manual_canada_send_otp(api, method="email"):
     """
     import requests
 
-    if not otp_state.get("xid") or not otp_state.get("otpkey"):
-        raise Exception("Missing OTP context. Call /status first to trigger authentication.")
+    if not otp_state.get("xid"):
+        raise Exception("Missing OTP context (xid). Call /status first to trigger authentication.")
 
     url = "https://kiaconnect.ca/tods/api/v2/cmm/sendOTP"
     headers = api.API_HEADERS.copy()
-    headers["otpkey"] = otp_state["otpkey"]
+    # NOTE: Canada doesn't seem to use "otpkey" header - only xid and notifytype
     headers["notifytype"] = "email" if method == "email" else "sms"
     headers["xid"] = otp_state["xid"]
 
@@ -134,12 +134,12 @@ def manual_canada_verify_otp(api, otp_code):
     """
     import requests
 
-    if not otp_state.get("xid") or not otp_state.get("otpkey"):
-        raise Exception("Missing OTP context.")
+    if not otp_state.get("xid"):
+        raise Exception("Missing OTP context (xid).")
 
     url = "https://kiaconnect.ca/tods/api/v2/cmm/verifyOTP"
     headers = api.API_HEADERS.copy()
-    headers["otpkey"] = otp_state["otpkey"]
+    # NOTE: Canada doesn't seem to use "otpkey" header - only xid
     headers["xid"] = otp_state["xid"]
     data = {"otp": otp_code}
 
@@ -299,10 +299,10 @@ def init_vehicle_manager():
 
                         if xid and status_header == "7110":
                             otp_state["xid"] = xid
-                            otp_state["otpkey"] = status_header  # Use status as otpkey
                             otp_state["required"] = True
                             otp_state["verified"] = False
-                            logger.info(f"OTP context extracted - xid: {xid}, will use manual Canada OTP flow")
+                            logger.info(f"OTP context extracted - xid: {xid}, status: {status_header}")
+                            logger.info("Will use manual Canada OTP flow (otpkey not needed)")
                         else:
                             logger.warning("Error 7110 but missing OTP context in headers")
 
