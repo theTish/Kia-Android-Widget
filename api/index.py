@@ -137,29 +137,34 @@ def manual_canada_send_otp(api, method="email"):
         except Exception as e:
             raise Exception(f"Failed to get xid: {e}")
 
-    # Step 2: Select verification method to get userInfoUuid and mfaApiCode
+    # Step 2: Select verification method to get userInfoUuid
     logger.info("Step 2: Calling /mfa/selverifmeth to get userInfoUuid...")
     selverif_url = "https://kiaconnect.ca/tods/api/mfa/selverifmeth"
     headers = api.API_HEADERS.copy()
 
-    selverif_response = requests.post(selverif_url, json={}, headers=headers, timeout=10)
+    selverif_data = {
+        "mfaApiCode": "0107",  # Always "0107" for Canada per PR #1033
+        "userAccount": os.environ.get("KIA_EMAIL")
+    }
+
+    selverif_response = requests.post(selverif_url, json=selverif_data, headers=headers, timeout=10)
     logger.info(f"selverifmeth response: {selverif_response.status_code}")
     logger.info(f"Response: {selverif_response.text[:500]}")
 
     if selverif_response.status_code != 200:
         raise Exception(f"selverifmeth failed: {selverif_response.status_code} - {selverif_response.text[:500]}")
 
-    selverif_data = selverif_response.json()
-    user_info_uuid = selverif_data.get("userInfoUuid")
-    mfa_api_code = selverif_data.get("mfaApiCode")
-    user_account = selverif_data.get("userAccount")  # Email addresses list
+    selverif_result = selverif_response.json()
+    user_info_uuid = selverif_result.get("userInfoUuid")
+    user_account_list = selverif_result.get("userAccount")  # List of email addresses
 
-    if not user_info_uuid or not mfa_api_code:
-        raise Exception(f"Missing userInfoUuid or mfaApiCode in response: {selverif_data}")
+    if not user_info_uuid:
+        raise Exception(f"Missing userInfoUuid in response: {selverif_result}")
 
-    logger.info(f"Got userInfoUuid: {user_info_uuid[:10]}..., mfaApiCode: {mfa_api_code}")
+    logger.info(f"Got userInfoUuid: {user_info_uuid[:10]}...")
+    logger.info(f"Available accounts: {user_account_list}")
     otp_state["userInfoUuid"] = user_info_uuid
-    otp_state["mfaApiCode"] = mfa_api_code
+    otp_state["mfaApiCode"] = "0107"  # Store for later steps
 
     # Step 3: Send OTP
     logger.info(f"Step 3: Sending OTP via {method} to /mfa/sendotp...")
@@ -167,8 +172,8 @@ def manual_canada_send_otp(api, method="email"):
 
     sendotp_data = {
         "otpMethod": "E" if method == "email" else "S",  # E=email, S=SMS
-        "mfaApiCode": mfa_api_code,
-        "userAccount": user_account,
+        "mfaApiCode": "0107",
+        "userAccount": os.environ.get("KIA_EMAIL"),
         "userPhone": "",  # Empty for email
         "userInfoUuid": user_info_uuid
     }
