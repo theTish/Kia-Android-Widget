@@ -113,8 +113,16 @@ def manual_canada_send_otp(api, method="email"):
     headers["xid"] = otp_state["xid"]
 
     logger.info(f"Sending OTP via {method} to Canada API...")
+    logger.info(f"Request URL: {url}")
+    logger.info(f"Request headers (sanitized): {dict((k, v[:20] + '...' if len(str(v)) > 20 else v) for k, v in headers.items())}")
+
     response = requests.post(url, json={}, headers=headers, timeout=10)
-    logger.info(f"Send OTP response: {response.status_code} - {response.text[:200]}")
+    logger.info(f"Send OTP response: {response.status_code}")
+    logger.info(f"Response headers: {dict(response.headers)}")
+    logger.info(f"Response body: {response.text[:500]}")
+
+    if response.status_code != 200:
+        raise Exception(f"OTP endpoint returned {response.status_code}. Full response: {response.text[:1000]}")
 
     return response.json()
 
