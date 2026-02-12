@@ -575,8 +575,8 @@ def send_otp():
             result = vehicle_manager.api.send_otp(otp_state["otp_request"], notify_type)
             logger.info(f"send_otp() returned: {result}")
 
-        elif otp_state.get("xid") and otp_state.get("otpkey"):
-            # Canada region - use manual OTP implementation
+        elif otp_state.get("xid"):
+            # Canada region - use manual OTP implementation (no otpkey needed)
             logger.info(f"Using manual Canada OTP flow - xid: {otp_state['xid']}")
             result = manual_canada_send_otp(vehicle_manager.api, method)
             logger.info(f"Manual send_otp() returned: {result}")
