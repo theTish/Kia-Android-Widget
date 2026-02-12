@@ -442,19 +442,25 @@ def send_otp():
 
     try:
         logger.info(f"Requesting OTP via {method}...")
-        vehicle_manager.send_otp(method)
+        logger.info(f"VehicleManager state - username: {vehicle_manager.username if hasattr(vehicle_manager, 'username') else 'N/A'}")
+        logger.info(f"VehicleManager has send_otp method: {hasattr(vehicle_manager, 'send_otp')}")
+
+        result = vehicle_manager.send_otp(method)
+        logger.info(f"send_otp() returned: {result}")
+
         otp_state["sent"] = True
         otp_state["required"] = True
 
         return jsonify({
             "status": "OTP sent",
             "method": method,
-            "message": f"Check your {method} for the OTP code, then call POST /otp/verify"
+            "message": f"Check your {method} for the OTP code, then call POST /otp/verify",
+            "debug": f"send_otp returned: {result}"
         }), 200
     except Exception as e:
-        logger.error(f"Failed to send OTP: {e}")
+        logger.error(f"Failed to send OTP: {e}", exc_info=True)
         otp_state["error"] = str(e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "type": type(e).__name__}), 500
 
 @app.route('/otp/verify', methods=['POST'])
 def verify_otp():
