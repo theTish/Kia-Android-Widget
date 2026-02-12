@@ -158,12 +158,30 @@ def init_vehicle_manager():
 
             vehicle_manager.api.login = logged_login
 
+            # Try to authenticate, but don't fail initialization if OTP is required
             try:
                 vehicle_manager.check_and_refresh_token()
                 logger.info("Token refreshed successfully.")
+                otp_state["required"] = False
+                otp_state["verified"] = True
             except Exception as auth_error:
-                logger.error(f"Authentication error: {auth_error}")
-                # Try to make a direct request to see what we get
+                error_msg = str(auth_error).lower()
+
+                # Check if this is an OTP requirement (not a fatal error)
+                if "otp" in error_msg or "2fa" in error_msg or "two-factor" in error_msg:
+                    logger.warning(f"OTP/2FA required for authentication: {auth_error}")
+                    otp_state["required"] = True
+                    otp_state["verified"] = False
+                    otp_state["error"] = "OTP required - call POST /otp/send to start authentication"
+                    # Don't fail initialization - let the user complete OTP flow
+                    logger.info("VehicleManager initialized but authentication pending OTP verification")
+                    return True
+
+                # For other errors, log but try to continue
+                logger.error(f"Authentication error (will retry on next request): {auth_error}")
+                otp_state["error"] = str(auth_error)
+
+                # Still try to diagnose
                 logger.info("Attempting direct API call to diagnose...")
                 try:
                     import copy
@@ -207,10 +225,12 @@ def init_vehicle_manager():
                 except Exception as test_error:
                     logger.error(f"Direct API test failed: {test_error}")
 
-                # Reset state so the next request attempts a clean initialization
-                vehicle_manager = None
-                VEHICLE_ID = None
-                raise
+                # Don't fail initialization - allow OTP flow to complete
+                # The user can call /otp/send and /otp/verify to complete auth
+                logger.warning("Initialization continuing despite auth error - OTP may be required")
+                logger.info("VehicleManager created but not authenticated. Use /otp/status to check requirements.")
+                # Return True to allow OTP endpoints to work (skip vehicle update)
+                return True
 
             logger.info("Updating vehicle states...")
             try:
