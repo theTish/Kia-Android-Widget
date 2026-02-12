@@ -431,8 +431,13 @@ def send_otp():
 
     Body: {"method": "sms"} or {"method": "email"}
     """
+    global vehicle_manager
+
+    # Initialize if needed (serverless instances don't persist state)
     if vehicle_manager is None:
-        return jsonify({"error": "Vehicle manager not initialized"}), 503
+        logger.info("VehicleManager not initialized, initializing now...")
+        if not init_vehicle_manager():
+            return jsonify({"error": "Failed to initialize vehicle manager"}), 503
 
     data = request.get_json() or {}
     method = data.get("method", "sms").lower()
@@ -469,8 +474,13 @@ def verify_otp():
 
     Body: {"otp": "123456"}
     """
+    global vehicle_manager
+
+    # Initialize if needed (serverless instances don't persist state)
     if vehicle_manager is None:
-        return jsonify({"error": "Vehicle manager not initialized"}), 503
+        logger.info("VehicleManager not initialized, initializing now...")
+        if not init_vehicle_manager():
+            return jsonify({"error": "Failed to initialize vehicle manager"}), 503
 
     data = request.get_json() or {}
     otp = data.get("otp", "").strip()
