@@ -8,6 +8,7 @@ from flask import Flask, request, jsonify
 
 # NOTE: Custom DNS patching removed - the hyundai_kia_connect_api library v3.52.1+
 # handles Cloudflare/IPv4 issues internally with its own socket patching
+# NOTE: v4.0+ adds OTP/2FA support required as of 2026 by Kia Canada
 
 # ── Constants ──
 REGION_CODES = {
@@ -82,6 +83,50 @@ vehicle_state_cache = {
 }
 rate_limit_store = {}
 
+# ── OTP/2FA Support ──
+otp_code_store = {
+    "code": None,
+    "timestamp": None,
+    "used": False
+}
+
+def otp_handler():
+    """
+    OTP handler callback for 2FA authentication.
+
+    This function is called by the library when OTP is required.
+    It waits for the OTP code to be provided via the /otp/provide endpoint.
+
+    Workflow:
+    1. Library triggers this callback when OTP is needed
+    2. User receives OTP via SMS/email from Kia
+    3. User calls POST /otp/provide with the code
+    4. This function returns the code to the library
+    """
+    logger.info("OTP required for authentication. Waiting for OTP code...")
+
+    # Wait up to 5 minutes for OTP code
+    max_wait_seconds = 300
+    wait_interval = 2
+    elapsed = 0
+
+    while elapsed < max_wait_seconds:
+        if otp_code_store["code"] is not None and not otp_code_store["used"]:
+            code = otp_code_store["code"]
+            otp_code_store["used"] = True
+            logger.info(f"OTP code received and will be used for authentication")
+            return code
+
+        import time
+        time.sleep(wait_interval)
+        elapsed += wait_interval
+
+        if elapsed % 30 == 0:  # Log every 30 seconds
+            logger.info(f"Still waiting for OTP code... ({elapsed}s / {max_wait_seconds}s)")
+
+    logger.error("OTP timeout: No OTP code provided within 5 minutes")
+    raise TimeoutError("OTP code not provided within 5 minutes. Please call POST /otp/provide with your OTP code.")
+
 def init_vehicle_manager():
     """Initialize vehicle manager lazily on first request."""
     global vehicle_manager, VEHICLE_ID
@@ -126,7 +171,8 @@ def init_vehicle_manager():
                 brand=BRAND_KIA,
                 username=USERNAME,
                 password=PASSWORD,
-                pin=str(PIN)
+                pin=str(PIN),
+                otp_handler=otp_handler  # v4.0+ OTP/2FA support
             )
 
             logger.info("Attempting to authenticate and refresh token...")
@@ -389,6 +435,53 @@ def diagnostics():
             "vehicle_id_value": VEHICLE_ID if VEHICLE_ID else None
         },
         "warnings": credential_warnings if credential_warnings else None
+    }), 200
+
+# ── OTP Endpoints (for 2FA authentication) ──
+@app.route('/otp/provide', methods=['POST'])
+def provide_otp():
+    """
+    Provide OTP code for 2FA authentication.
+
+    When authentication requires OTP, call this endpoint with the code you received.
+
+    Body: {"otp": "123456"}
+    """
+    data = request.get_json() or {}
+    otp = data.get("otp", "").strip()
+
+    if not otp:
+        return jsonify({"error": "Missing 'otp' in request body"}), 400
+
+    if not otp.isdigit():
+        return jsonify({"error": "OTP must be numeric"}), 400
+
+    # Store the OTP code
+    otp_code_store["code"] = otp
+    otp_code_store["timestamp"] = datetime.now()
+    otp_code_store["used"] = False
+
+    logger.info(f"OTP code received and stored (length: {len(otp)})")
+
+    return jsonify({
+        "status": "OTP code received",
+        "message": "The code will be used for the next authentication attempt"
+    }), 200
+
+@app.route('/otp/status', methods=['GET'])
+def otp_status():
+    """Check OTP status."""
+    if otp_code_store["code"] is None:
+        return jsonify({
+            "status": "No OTP code stored",
+            "waiting": False
+        }), 200
+
+    return jsonify({
+        "status": "OTP code available",
+        "timestamp": otp_code_store["timestamp"].isoformat() if otp_code_store["timestamp"] else None,
+        "used": otp_code_store["used"],
+        "waiting": not otp_code_store["used"]
     }), 200
 
 # ── List Vehicles Endpoint ──
