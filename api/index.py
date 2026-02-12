@@ -84,48 +84,13 @@ vehicle_state_cache = {
 rate_limit_store = {}
 
 # ── OTP/2FA Support ──
-otp_code_store = {
-    "code": None,
-    "timestamp": None,
-    "used": False
+# State tracking for OTP authentication process
+otp_state = {
+    "required": False,
+    "sent": False,
+    "verified": False,
+    "error": None
 }
-
-def otp_handler():
-    """
-    OTP handler callback for 2FA authentication.
-
-    This function is called by the library when OTP is required.
-    It waits for the OTP code to be provided via the /otp/provide endpoint.
-
-    Workflow:
-    1. Library triggers this callback when OTP is needed
-    2. User receives OTP via SMS/email from Kia
-    3. User calls POST /otp/provide with the code
-    4. This function returns the code to the library
-    """
-    logger.info("OTP required for authentication. Waiting for OTP code...")
-
-    # Wait up to 5 minutes for OTP code
-    max_wait_seconds = 300
-    wait_interval = 2
-    elapsed = 0
-
-    while elapsed < max_wait_seconds:
-        if otp_code_store["code"] is not None and not otp_code_store["used"]:
-            code = otp_code_store["code"]
-            otp_code_store["used"] = True
-            logger.info(f"OTP code received and will be used for authentication")
-            return code
-
-        import time
-        time.sleep(wait_interval)
-        elapsed += wait_interval
-
-        if elapsed % 30 == 0:  # Log every 30 seconds
-            logger.info(f"Still waiting for OTP code... ({elapsed}s / {max_wait_seconds}s)")
-
-    logger.error("OTP timeout: No OTP code provided within 5 minutes")
-    raise TimeoutError("OTP code not provided within 5 minutes. Please call POST /otp/provide with your OTP code.")
 
 def init_vehicle_manager():
     """Initialize vehicle manager lazily on first request."""
@@ -171,8 +136,9 @@ def init_vehicle_manager():
                 brand=BRAND_KIA,
                 username=USERNAME,
                 password=PASSWORD,
-                pin=str(PIN),
-                otp_handler=otp_handler  # v4.0+ OTP/2FA support
+                pin=str(PIN)
+                # NOTE: otp_handler is NOT a constructor parameter in v4.4.0
+                # OTP is handled via send_otp() and verify_otp() methods
             )
 
             logger.info("Attempting to authenticate and refresh token...")
@@ -438,15 +404,48 @@ def diagnostics():
     }), 200
 
 # ── OTP Endpoints (for 2FA authentication) ──
-@app.route('/otp/provide', methods=['POST'])
-def provide_otp():
+@app.route('/otp/send', methods=['POST'])
+def send_otp():
     """
-    Provide OTP code for 2FA authentication.
+    Request OTP to be sent via SMS/email.
 
-    When authentication requires OTP, call this endpoint with the code you received.
+    Body: {"method": "sms"} or {"method": "email"}
+    """
+    if vehicle_manager is None:
+        return jsonify({"error": "Vehicle manager not initialized"}), 503
+
+    data = request.get_json() or {}
+    method = data.get("method", "sms").lower()
+
+    if method not in ["sms", "email"]:
+        return jsonify({"error": "Method must be 'sms' or 'email'"}), 400
+
+    try:
+        logger.info(f"Requesting OTP via {method}...")
+        vehicle_manager.send_otp(method)
+        otp_state["sent"] = True
+        otp_state["required"] = True
+
+        return jsonify({
+            "status": "OTP sent",
+            "method": method,
+            "message": f"Check your {method} for the OTP code, then call POST /otp/verify"
+        }), 200
+    except Exception as e:
+        logger.error(f"Failed to send OTP: {e}")
+        otp_state["error"] = str(e)
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/otp/verify', methods=['POST'])
+def verify_otp():
+    """
+    Verify the OTP code you received.
 
     Body: {"otp": "123456"}
     """
+    if vehicle_manager is None:
+        return jsonify({"error": "Vehicle manager not initialized"}), 503
+
     data = request.get_json() or {}
     otp = data.get("otp", "").strip()
 
@@ -456,32 +455,34 @@ def provide_otp():
     if not otp.isdigit():
         return jsonify({"error": "OTP must be numeric"}), 400
 
-    # Store the OTP code
-    otp_code_store["code"] = otp
-    otp_code_store["timestamp"] = datetime.now()
-    otp_code_store["used"] = False
+    try:
+        logger.info(f"Verifying OTP code (length: {len(otp)})...")
+        vehicle_manager.verify_otp(otp)
+        otp_state["verified"] = True
+        otp_state["required"] = False
 
-    logger.info(f"OTP code received and stored (length: {len(otp)})")
+        # Now try to complete authentication
+        vehicle_manager.check_and_refresh_token()
 
-    return jsonify({
-        "status": "OTP code received",
-        "message": "The code will be used for the next authentication attempt"
-    }), 200
+        return jsonify({
+            "status": "OTP verified",
+            "message": "Authentication complete. You can now use the API normally."
+        }), 200
+    except Exception as e:
+        logger.error(f"Failed to verify OTP: {e}")
+        otp_state["error"] = str(e)
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/otp/status', methods=['GET'])
 def otp_status():
-    """Check OTP status."""
-    if otp_code_store["code"] is None:
-        return jsonify({
-            "status": "No OTP code stored",
-            "waiting": False
-        }), 200
-
+    """Check OTP authentication status."""
     return jsonify({
-        "status": "OTP code available",
-        "timestamp": otp_code_store["timestamp"].isoformat() if otp_code_store["timestamp"] else None,
-        "used": otp_code_store["used"],
-        "waiting": not otp_code_store["used"]
+        "otp_required": otp_state["required"],
+        "otp_sent": otp_state["sent"],
+        "otp_verified": otp_state["verified"],
+        "error": otp_state["error"],
+        "vehicle_manager_initialized": vehicle_manager is not None,
+        "instructions": "If OTP required: 1) POST /otp/send, 2) Check SMS/email, 3) POST /otp/verify with code"
     }), 200
 
 # ── List Vehicles Endpoint ──
