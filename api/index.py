@@ -106,7 +106,7 @@ def manual_canada_send_otp(api, method="email"):
     if not otp_state.get("xid") or not otp_state.get("otpkey"):
         raise Exception("Missing OTP context. Call /status first to trigger authentication.")
 
-    url = "https://kiaconnect.ca/tods/api/cmm/sendOTP"
+    url = "https://kiaconnect.ca/tods/api/v2/cmm/sendOTP"
     headers = api.API_HEADERS.copy()
     headers["otpkey"] = otp_state["otpkey"]
     headers["notifytype"] = "email" if method == "email" else "sms"
@@ -129,7 +129,7 @@ def manual_canada_verify_otp(api, otp_code):
     if not otp_state.get("xid") or not otp_state.get("otpkey"):
         raise Exception("Missing OTP context.")
 
-    url = "https://kiaconnect.ca/tods/api/cmm/verifyOTP"
+    url = "https://kiaconnect.ca/tods/api/v2/cmm/verifyOTP"
     headers = api.API_HEADERS.copy()
     headers["otpkey"] = otp_state["otpkey"]
     headers["xid"] = otp_state["xid"]
