@@ -108,6 +108,10 @@ def manual_canada_send_otp(api, method="email"):
     """
     import requests
 
+    # Use a session to preserve cookies across requests (CRITICAL!)
+    session = requests.Session()
+    headers = api.API_HEADERS.copy()
+
     # Step 1: Ensure we have xid from initial login
     if not otp_state.get("xid"):
         logger.info("No xid, triggering login to get error 7110...")
@@ -117,7 +121,7 @@ def manual_canada_send_otp(api, method="email"):
                 "userId": os.environ.get("KIA_EMAIL"),
                 "password": os.environ.get("KIA_PASSWORD")
             }
-            login_response = requests.post(login_url, json=login_data, headers=api.API_HEADERS, timeout=10)
+            login_response = session.post(login_url, json=login_data, headers=headers, timeout=10)
 
             if login_response.status_code == 200:
                 response_json = login_response.json()
@@ -128,6 +132,7 @@ def manual_canada_send_otp(api, method="email"):
                     if xid:
                         otp_state["xid"] = xid
                         logger.info(f"Got xid from login: {xid}")
+                        logger.info(f"Session cookies: {session.cookies.get_dict()}")
                     else:
                         raise Exception("Error 7110 but no transactionId")
                 else:
@@ -140,14 +145,13 @@ def manual_canada_send_otp(api, method="email"):
     # Step 2: Select verification method to get userInfoUuid
     logger.info("Step 2: Calling /mfa/selverifmeth to get userInfoUuid...")
     selverif_url = "https://kiaconnect.ca/tods/api/mfa/selverifmeth"
-    headers = api.API_HEADERS.copy()
 
     selverif_data = {
         "mfaApiCode": "0107",  # Always "0107" for Canada per PR #1033
         "userAccount": os.environ.get("KIA_EMAIL")
     }
 
-    selverif_response = requests.post(selverif_url, json=selverif_data, headers=headers, timeout=10)
+    selverif_response = session.post(selverif_url, json=selverif_data, headers=headers, timeout=10)
     logger.info(f"selverifmeth response: {selverif_response.status_code}")
     logger.info(f"Response: {selverif_response.text[:500]}")
 
@@ -178,7 +182,7 @@ def manual_canada_send_otp(api, method="email"):
         "userInfoUuid": user_info_uuid
     }
 
-    sendotp_response = requests.post(sendotp_url, json=sendotp_data, headers=headers, timeout=10)
+    sendotp_response = session.post(sendotp_url, json=sendotp_data, headers=headers, timeout=10)
     logger.info(f"sendotp response: {sendotp_response.status_code}")
     logger.info(f"Response: {sendotp_response.text[:500]}")
 
