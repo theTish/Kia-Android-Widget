@@ -103,8 +103,41 @@ def manual_canada_send_otp(api, method="email"):
     """
     import requests
 
+    # Auto-trigger authentication to get xid if missing (for stateless Vercel functions)
     if not otp_state.get("xid"):
-        raise Exception("Missing OTP context (xid). Call /status first to trigger authentication.")
+        logger.info("No xid in otp_state, triggering authentication to get fresh xid...")
+        try:
+            # Make direct login call to trigger error 7110 and extract xid
+            login_url = "https://kiaconnect.ca/tods/api/v2/login"
+            login_data = {
+                "userId": os.environ.get("KIA_EMAIL"),
+                "password": os.environ.get("KIA_PASSWORD")
+            }
+            login_response = requests.post(login_url, json=login_data, headers=api.API_HEADERS, timeout=10)
+
+            # Check for error 7110 and extract xid
+            if login_response.status_code == 200:
+                response_json = login_response.json()
+                error_code = response_json.get("error", {}).get("errorCode")
+
+                if error_code == "7110":
+                    xid = login_response.headers.get("transactionId")
+                    if xid:
+                        otp_state["xid"] = xid
+                        otp_state["required"] = True
+                        otp_state["verified"] = False
+                        logger.info(f"Got fresh xid from login: {xid}")
+                    else:
+                        raise Exception("Error 7110 but no transactionId in headers")
+                else:
+                    raise Exception(f"Expected error 7110 but got: {error_code}")
+            else:
+                raise Exception(f"Login failed with status {login_response.status_code}")
+        except Exception as e:
+            raise Exception(f"Failed to get xid: {e}")
+
+    if not otp_state.get("xid"):
+        raise Exception("Still missing xid after authentication attempt")
 
     url = "https://kiaconnect.ca/tods/api/v2/cmm/sendOTP"
     headers = api.API_HEADERS.copy()
