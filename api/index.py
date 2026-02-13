@@ -140,18 +140,18 @@ def manual_canada_send_otp(method="email"):
         'Deviceid': base64.b64encode(unique_device_id.encode()).decode()
     }
 
-    # Step 1: Check if we have a VERY recent xid (< 15 seconds) to avoid rate limit
+    # Step 1: Check if we have a VERY recent xid (< 10 seconds) to avoid rate limit
     existing_xid = otp_state.get("xid")
     last_xid_time = otp_state.get("xid_timestamp", 0)
     current_time = time.time()
     time_since_last_xid = current_time - last_xid_time
 
-    # If we have a fresh xid (< 15 seconds), skip login to avoid error 7901
-    if existing_xid and time_since_last_xid < 15:
+    # If we have a fresh xid (< 10 seconds), skip login to avoid error 7901
+    # CRITICAL: Only skip if xid is VERY fresh - we need session cookies!
+    if existing_xid and time_since_last_xid < 10:
         logger.info(f"Step 1: Reusing recent xid (age: {int(time_since_last_xid)}s) to avoid rate limit: {existing_xid}")
         xid = existing_xid
-        # Note: We don't have session cookies, but we'll try anyway
-        # The selverifmeth might work without cookies if xid is fresh enough
+        # Note: We might not have session cookies, but xid is so fresh it should work
     else:
         # Step 1: Login to get session cookies and xid (with retry on rate limit)
         logger.info("Step 1: Triggering login to get error 7110 and session cookies...")
@@ -163,8 +163,9 @@ def manual_canada_send_otp(method="email"):
         }
 
         # Retry logic for error 7901 (rate limit)
-        max_retries = 2  # Reduced from 3 to avoid timeout
-        retry_delay = 3  # Reduced from 5 to avoid timeout
+        # Wait longer (8s) to let rate limit clear, but only 1 retry to avoid timeout
+        max_retries = 2
+        retry_delay = 8  # Longer wait to let rate limit clear
 
         for attempt in range(max_retries):
             try:
@@ -187,33 +188,28 @@ def manual_canada_send_otp(method="email"):
                             raise Exception("Error 7110 but no transactionId")
 
                     elif error_code == "7901":
-                        # Rate limited - if we have existing xid, use it; otherwise retry
-                        if existing_xid:
-                            logger.warning(f"Got error 7901 (rate limited), falling back to existing xid: {existing_xid}")
-                            xid = existing_xid
-                            break  # Use existing xid
-                        elif attempt < max_retries - 1:
+                        # Rate limited - wait longer and retry (don't use stale xid!)
+                        if attempt < max_retries - 1:
                             logger.warning(f"Got error 7901 (rate limited), waiting {retry_delay}s before retry...")
                             time.sleep(retry_delay)
                             continue  # Retry
                         else:
-                            raise Exception(f"Still getting error 7901 after {max_retries} attempts and no existing xid to use")
+                            raise Exception(
+                                f"Rate limited (error 7901) - too many login attempts. "
+                                f"Please wait 15-20 seconds and try again."
+                            )
                     else:
                         raise Exception(f"Expected error 7110 but got: {error_code}")
                 else:
                     raise Exception(f"Login failed: {login_response.status_code}")
 
             except Exception as e:
-                if existing_xid and "7901" in str(e):
-                    logger.warning(f"Login failed with 7901, falling back to existing xid: {existing_xid}")
-                    xid = existing_xid
-                    break
-                elif attempt < max_retries - 1 and "7901" in str(e):
+                if attempt < max_retries - 1 and "7901" in str(e):
                     logger.warning(f"Login failed (attempt {attempt + 1}), retrying in {retry_delay}s: {e}")
                     time.sleep(retry_delay)
                     continue
                 else:
-                    raise Exception(f"Failed to login after {attempt + 1} attempts: {e}")
+                    raise Exception(f"Failed to login: {e}")
 
     # Step 2: Select verification method to get userInfoUuid
     logger.info("Step 2: Calling /mfa/selverifmeth to get userInfoUuid...")
