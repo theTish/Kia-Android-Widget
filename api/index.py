@@ -95,11 +95,15 @@ otp_state = {
     "otpkey": None  # OTP key from error response
 }
 
-def manual_canada_send_otp(method="email"):
+def manual_canada_send_otp(method="email", provided_xid=None):
     """
     Manually send OTP for Canada region using correct MFA flow.
 
     Based on PR #1033: https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/pull/1033
+
+    Args:
+        method: "email" or "sms"
+        provided_xid: Optional transaction ID from previous request to reuse (avoids new login)
 
     Flow:
     1. Login (error 7110) → get transactionId
@@ -140,18 +144,24 @@ def manual_canada_send_otp(method="email"):
         'Deviceid': base64.b64encode(unique_device_id.encode()).decode()
     }
 
-    # Step 1: Check if we have a VERY recent xid (< 10 seconds) to avoid rate limit
-    existing_xid = otp_state.get("xid")
-    last_xid_time = otp_state.get("xid_timestamp", 0)
+    # Step 1: Check if we can reuse existing xid (either provided by client or from otp_state)
     current_time = time.time()
-    time_since_last_xid = current_time - last_xid_time
 
-    # If we have a fresh xid (< 10 seconds), skip login to avoid error 7901
-    # CRITICAL: Only skip if xid is VERY fresh - we need session cookies!
-    if existing_xid and time_since_last_xid < 10:
-        logger.info(f"Step 1: Reusing recent xid (age: {int(time_since_last_xid)}s) to avoid rate limit: {existing_xid}")
-        xid = existing_xid
-        # Note: We might not have session cookies, but xid is so fresh it should work
+    # Option 1: Client provided xid (from previous request in different Lambda instance)
+    if provided_xid:
+        logger.info(f"Step 1: Using client-provided xid: {provided_xid}")
+        xid = provided_xid
+        # Store it in otp_state for potential reuse in same Lambda instance
+        otp_state["xid"] = xid
+        otp_state["xid_timestamp"] = current_time
+        # Note: We don't have session cookies, but xid should still work for MFA calls
+    # Option 2: Reuse VERY recent xid from same Lambda instance (< 10 seconds)
+    elif otp_state.get("xid") and (current_time - otp_state.get("xid_timestamp", 0)) < 10:
+        xid = otp_state["xid"]
+        time_since_last_xid = current_time - otp_state["xid_timestamp"]
+        logger.info(f"Step 1: Reusing recent xid from same Lambda (age: {int(time_since_last_xid)}s): {xid}")
+        # Note: We have session cookies since xid is very fresh
+    # Option 3: Need fresh login to get new xid
     else:
         # Step 1: Login to get session cookies and xid (with retry on rate limit)
         logger.info("Step 1: Triggering login to get error 7110 and session cookies...")
@@ -196,7 +206,8 @@ def manual_canada_send_otp(method="email"):
                         else:
                             raise Exception(
                                 f"Rate limited (error 7901) - too many login attempts. "
-                                f"Please wait 15-20 seconds and try again."
+                                f"Please wait 30-60 minutes for rate limit to clear. "
+                                f"TIP: Pass 'xid' from previous response to reuse it and avoid new login."
                             )
                     else:
                         raise Exception(f"Expected error 7110 but got: {error_code}")
@@ -694,12 +705,15 @@ def send_otp():
     """
     Request OTP to be sent via SMS/email.
 
-    Body: {"method": "sms"} or {"method": "email"}
+    Body:
+        {"method": "sms"} or {"method": "email"}
+        Optional: {"xid": "4091163502"} to reuse existing transaction ID
     """
     global vehicle_manager
 
     data = request.get_json() or {}
     method = data.get("method", "sms").lower()
+    provided_xid = data.get("xid")  # Optional: client can pass xid to reuse
 
     if method not in ["sms", "email"]:
         return jsonify({"error": "Method must be 'sms' or 'email'"}), 400
@@ -726,7 +740,7 @@ def send_otp():
             # Canada region - use manual MFA flow (INDEPENDENT - no VehicleManager needed!)
             # This avoids rate limiting (error 7901) from double login
             logger.info("Using manual Canada MFA flow (no VehicleManager init needed)...")
-            result = manual_canada_send_otp(method)
+            result = manual_canada_send_otp(method, provided_xid)
             logger.info(f"Manual send_otp() returned: {result}")
 
         otp_state["sent"] = True
@@ -736,7 +750,8 @@ def send_otp():
             "status": "OTP sent",
             "method": method,
             "message": f"Check your {method} for the OTP code, then call POST /otp/verify",
-            "region": "USA (library)" if otp_state.get("otp_request") else "Canada (manual)"
+            "region": "USA (library)" if otp_state.get("otp_request") else "Canada (manual)",
+            "xid": otp_state.get("xid")  # Return xid so client can reuse it
         }), 200
     except Exception as e:
         logger.error(f"Failed to send OTP: {e}", exc_info=True)
