@@ -10,6 +10,7 @@ dependencies = [
     "requests>=2.31.0",
     "tzdata>=2023.3",
     "gunicorn>=21.2.0",
+    "dnspython>=2.4.0",
 ]
 
 [tool.uv]
