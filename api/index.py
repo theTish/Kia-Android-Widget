@@ -92,7 +92,9 @@ otp_state = {
     "error": None,
     "otp_request": None,  # Stores OTP data from initial login
     "xid": None,  # Transaction ID from error response
-    "otpkey": None  # OTP key from error response
+    "xid_timestamp": 0,  # When xid was obtained
+    "otpkey": None,  # OTP key from error response
+    "rate_limited_until": 0,  # Timestamp: don't attempt login until this time
 }
 
 def manual_canada_send_otp(method="email", provided_xid=None):
@@ -151,19 +153,26 @@ def manual_canada_send_otp(method="email", provided_xid=None):
     if provided_xid:
         logger.info(f"Step 1: Using client-provided xid: {provided_xid}")
         xid = provided_xid
-        # Store it in otp_state for potential reuse in same Lambda instance
         otp_state["xid"] = xid
         otp_state["xid_timestamp"] = current_time
-        # Note: We don't have session cookies, but xid should still work for MFA calls
-    # Option 2: Reuse VERY recent xid from same Lambda instance (< 10 seconds)
-    elif otp_state.get("xid") and (current_time - otp_state.get("xid_timestamp", 0)) < 10:
+    # Option 2: Reuse recent xid from same Lambda instance (< 5 minutes)
+    elif otp_state.get("xid") and (current_time - otp_state.get("xid_timestamp", 0)) < 300:
         xid = otp_state["xid"]
-        time_since_last_xid = current_time - otp_state["xid_timestamp"]
-        logger.info(f"Step 1: Reusing recent xid from same Lambda (age: {int(time_since_last_xid)}s): {xid}")
-        # Note: We have session cookies since xid is very fresh
-    # Option 3: Need fresh login to get new xid
+        age = int(current_time - otp_state["xid_timestamp"])
+        logger.info(f"Step 1: Reusing cached xid (age: {age}s): {xid}")
+    # Option 3: Need fresh login - but check rate limit guard first
     else:
-        # Step 1: Login to get session cookies and xid (with retry on rate limit)
+        # RATE LIMIT GUARD: If we recently got a 7901, refuse to hit the API
+        # This prevents us from resetting the rate limit timer with every request
+        rate_limited_until = otp_state.get("rate_limited_until", 0)
+        if current_time < rate_limited_until:
+            wait_minutes = int((rate_limited_until - current_time) / 60) + 1
+            raise Exception(
+                f"Rate limit cooldown active. Do NOT retry for {wait_minutes} more minutes. "
+                f"Cooldown expires at Unix timestamp {int(rate_limited_until)}. "
+                f"Each retry resets the timer! Just wait."
+            )
+
         logger.info("Step 1: Triggering login to get error 7110 and session cookies...")
 
         login_url = "https://kiaconnect.ca/tods/api/v2/login"
@@ -172,55 +181,39 @@ def manual_canada_send_otp(method="email", provided_xid=None):
             "password": os.environ.get("KIA_PASSWORD")
         }
 
-        # Retry logic for error 7901 (rate limit)
-        # Wait longer (8s) to let rate limit clear, but only 1 retry to avoid timeout
-        max_retries = 2
-        retry_delay = 8  # Longer wait to let rate limit clear
+        # NO RETRIES on 7901 - retrying resets the rate limit timer!
+        login_response = session.post(login_url, json=login_data, headers=headers, timeout=10)
+        logger.info(f"Login response: {login_response.status_code}")
 
-        for attempt in range(max_retries):
-            try:
-                login_response = session.post(login_url, json=login_data, headers=headers, timeout=10)
-                logger.info(f"Login response (attempt {attempt + 1}): {login_response.status_code}")
-                logger.info(f"Session cookies after login: {session.cookies.get_dict()}")
+        if login_response.status_code == 200:
+            response_json = login_response.json()
+            error_code = response_json.get("error", {}).get("errorCode")
 
-                if login_response.status_code == 200:
-                    response_json = login_response.json()
-                    error_code = response_json.get("error", {}).get("errorCode")
-
-                    if error_code == "7110":
-                        xid = login_response.headers.get("transactionId")
-                        if xid:
-                            otp_state["xid"] = xid
-                            otp_state["xid_timestamp"] = current_time
-                            logger.info(f"Got xid from login: {xid}")
-                            break  # Success!
-                        else:
-                            raise Exception("Error 7110 but no transactionId")
-
-                    elif error_code == "7901":
-                        # Rate limited - wait longer and retry (don't use stale xid!)
-                        if attempt < max_retries - 1:
-                            logger.warning(f"Got error 7901 (rate limited), waiting {retry_delay}s before retry...")
-                            time.sleep(retry_delay)
-                            continue  # Retry
-                        else:
-                            raise Exception(
-                                f"Rate limited (error 7901) - too many login attempts. "
-                                f"Please wait 30-60 minutes for rate limit to clear. "
-                                f"TIP: Pass 'xid' from previous response to reuse it and avoid new login."
-                            )
-                    else:
-                        raise Exception(f"Expected error 7110 but got: {error_code}")
+            if error_code == "7110":
+                xid = login_response.headers.get("transactionId")
+                if xid:
+                    otp_state["xid"] = xid
+                    otp_state["xid_timestamp"] = current_time
+                    otp_state["rate_limited_until"] = 0  # Clear any cooldown
+                    logger.info(f"Got xid from login: {xid}")
                 else:
-                    raise Exception(f"Login failed: {login_response.status_code}")
+                    raise Exception("Error 7110 but no transactionId in headers")
 
-            except Exception as e:
-                if attempt < max_retries - 1 and "7901" in str(e):
-                    logger.warning(f"Login failed (attempt {attempt + 1}), retrying in {retry_delay}s: {e}")
-                    time.sleep(retry_delay)
-                    continue
-                else:
-                    raise Exception(f"Failed to login: {e}")
+            elif error_code == "7901":
+                # Rate limited! Set a 35-minute cooldown to let it clear
+                # DO NOT RETRY - each attempt resets the timer
+                cooldown_seconds = 35 * 60  # 35 minutes
+                otp_state["rate_limited_until"] = current_time + cooldown_seconds
+                cooldown_expires = time.strftime('%H:%M UTC', time.gmtime(current_time + cooldown_seconds))
+                raise Exception(
+                    f"Rate limited (error 7901). Cooldown set for 35 minutes. "
+                    f"Do NOT retry until {cooldown_expires}. "
+                    f"Each login attempt resets the rate limit timer!"
+                )
+            else:
+                raise Exception(f"Expected error 7110 but got error code: {error_code}, response: {response_json}")
+        else:
+            raise Exception(f"Login failed with HTTP {login_response.status_code}")
 
     # Step 2: Select verification method to get userInfoUuid
     logger.info("Step 2: Calling /mfa/selverifmeth to get userInfoUuid...")
