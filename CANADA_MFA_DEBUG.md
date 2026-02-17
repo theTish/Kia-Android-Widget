@@ -1,7 +1,8 @@
 # Canada MFA OTP Flow - Debugging Documentation
 
 **Created**: 2026-02-13
-**Status**: In Progress - Deployment Fix Applied
+**Last Updated**: 2026-02-17
+**Status**: In Progress - Rate Limit Guard Deployed
 **Branch**: `claude/code-review-01JidRpCMLVWNUyYRgYh5fiD`
 
 ---
@@ -29,10 +30,16 @@ Fix the Canada region MFA (Multi-Factor Authentication) OTP flow to allow users 
 - Last failed login: `2026-02-13 18:50 UTC` (1:50 PM EST)
 - Rate limit clears: `2026-02-13 19:20-19:50 UTC` (2:20-2:50 PM EST)
 
-**Solution Implemented**:
-- Added `xid` caching mechanism to reuse valid session tokens
+**Root Cause (discovered 2026-02-17)**:
+- **Retrying on 7901 resets the rate limit timer!** Each login attempt extends the cooldown.
+- Old code retried twice with 8s delay → made 2 API calls per request → timer never cleared.
+- Multiple curl test requests compounded this further.
+
+**Solution Implemented (v2 - 2026-02-17)**:
+- **Rate limit guard**: After getting 7901, sets a 35-minute local cooldown. During cooldown, `/otp/send` returns error immediately WITHOUT hitting the Kia API.
+- **Zero retries on 7901**: Single login attempt, no retry loop.
+- **xid caching extended to 5 minutes** (was 10 seconds) to reduce login calls.
 - Client can provide existing xid via request body: `{"method": "email", "xid": "1234567890"}`
-- Skips login step if xid is provided
 
 ### Problem 2: xid Expiration (Error 7715)
 **Error**: `{"error":{"errorCode":"7715"},"responseHeader":{"responseCode":1,"responseDesc":"Failure"}}`
@@ -229,64 +236,65 @@ Step 4: Verify OTP
 
 ---
 
-## 🚀 **Current Status**
+## 🚀 **Current Status (Updated 2026-02-17)**
 
 ### ✅ **Completed**
 1. ✅ Identified rate limit issue (error 7901)
 2. ✅ Implemented xid reuse mechanism
 3. ✅ Added detailed logging for each MFA step
-4. ✅ Fixed missing `dnspython` dependency
-5. ✅ Committed and pushed fix (commit `023d62b`)
+4. ✅ Fixed missing `dnspython` dependency (commit `023d62b`)
+5. ✅ **Discovered retries reset rate limit timer** (2026-02-17)
+6. ✅ **Added rate limit guard** - blocks API calls for 35 min after 7901
+7. ✅ **Removed retry loop** - single attempt, no retries on 7901
+8. ✅ **Extended xid cache** to 5 minutes (was 10 seconds)
 
 ### 🔄 **In Progress**
-- **Waiting for Vercel deployment** with new `dnspython` dependency
+- **Rate limit needs to clear** - last failed attempt was 2026-02-17 14:54 UTC
+- Cooldown should expire around **15:30 UTC** (35 min from last attempt)
 
-### ⏳ **Blocked**
-- **Rate limit** from failed login attempts
-- Last failed attempt: `2026-02-13 18:50 UTC`
-- Can retry after: `2026-02-13 19:20-19:50 UTC` (30-60 min window)
+### ⏳ **Critical Insight**
+- **STOP TESTING until 15:30 UTC (Feb 17)**
+- Every login attempt resets the rate limit timer
+- The new guard prevents the code from hitting the API during cooldown
+- But the guard only works within a single Lambda instance (Vercel may spin up new ones)
+- **Best approach**: Wait 35+ minutes, then make ONE clean request
 
 ---
 
 ## 🎯 **Next Steps**
 
-### 1. Verify Deployment
-Check Vercel logs after redeployment:
-- Should see `dnspython` installed in build logs
-- No more `ModuleNotFoundError: No module named 'dns'`
+### 1. WAIT for Rate Limit to Clear
+- **Last failed attempt**: 2026-02-17 14:54 UTC
+- **Do NOT test until**: 2026-02-17 15:30 UTC (or later to be safe)
+- **Why**: Each login attempt resets the rate limit timer. Must stop poking the API.
 
-### 2. Wait for Rate Limit to Clear
-Current time: ~`2026-02-13 18:52 UTC`
-Can test again: `2026-02-13 19:20-19:50 UTC` (28-58 minutes)
-
-### 3. Test Fresh OTP Request
+### 2. Make ONE Clean OTP Request
+After waiting 35+ minutes:
 ```bash
 curl -X POST https://kia-android-widget.vercel.app/otp/send \
   -H "Content-Type: application/json" \
   -d '{"method": "email"}'
 ```
 
-**Expected**: New xid created, OTP sent successfully
+**Expected**: New xid created (error 7110), then OTP sent successfully.
+**If 7901 again**: Wait another 35 minutes. The rate limit guard will now prevent repeated hits.
 
-### 4. Save xid for Future Requests
+### 3. Save xid for Future Requests
 From response, save the `xid` value:
 ```json
-{"success": true, "xid": "NEW_XID_HERE", ...}
+{"status": "OTP sent", "xid": "NEW_XID_HERE", ...}
 ```
 
-### 5. Test OTP Verification
+### 4. Test OTP Verification
 Once OTP code received in email:
 ```bash
 curl -X POST https://kia-android-widget.vercel.app/otp/verify \
   -H "Content-Type: application/json" \
-  -d '{
-    "code": "123456",
-    "xid": "NEW_XID_HERE"
-  }'
+  -d '{"otp": "123456"}'
 ```
 
-### 6. Test Vehicle Commands
-After successful OTP verification, test vehicle API:
+### 5. Test Vehicle Commands
+After successful OTP verification:
 ```bash
 curl https://kia-android-widget.vercel.app/vehicle/status
 ```
@@ -360,28 +368,39 @@ for rdata in answers:
 ## 🤝 **Handoff Summary for New Session**
 
 **What's Working**:
-- xid caching and reuse logic ✅
+- xid caching and reuse logic (extended to 5 min) ✅
 - Manual MFA flow implementation ✅
 - Detailed logging at each step ✅
+- Rate limit guard (blocks repeated API calls) ✅
+- `dnspython` dependency installed ✅
 
-**What's Fixed**:
-- Missing `dnspython` dependency ✅
+**Key Discovery (2026-02-17)**:
+- Retrying on error 7901 **resets the rate limit timer** on Kia's side
+- The old code made 2 attempts per request → timer never cleared
+- Fixed: single attempt, local 35-min cooldown on 7901
 
-**What Needs Testing**:
-1. Verify Vercel deployed with `dnspython`
-2. Wait for rate limit to clear (check timestamps above)
-3. Test fresh OTP request (without xid)
-4. Test OTP verification
-5. Test vehicle commands post-auth
+**What Needs Testing** (AFTER 35+ min from last attempt):
+1. Make ONE clean `/otp/send` request
+2. Check if error 7110 is returned (success = xid obtained)
+3. If OTP sent, verify with `/otp/verify`
+4. Test vehicle commands post-auth
 
-**Quick Start Command** (after rate limit clears):
+**Quick Start Command** (after rate limit clears at ~15:30 UTC Feb 17):
 ```bash
 curl -X POST https://kia-android-widget.vercel.app/otp/send \
   -H "Content-Type: application/json" \
   -d '{"method": "email"}'
 ```
 
+**Important Caveat**:
+- The rate limit guard lives in Lambda memory. Vercel may spin up a NEW Lambda instance
+  that doesn't have the cooldown state. If this happens, the new instance will make one
+  login attempt (potentially hitting 7901 again). This is still better than 2 attempts.
+- For bulletproof protection, consider adding a persistent cooldown (e.g., Redis/KV store)
+
 ---
 
-**Last Updated**: 2026-02-13 20:40 UTC
-**Last Commit**: `023d62b` - "Add dnspython dependency for DNS SRV lookups"
+**Last Updated**: 2026-02-17 14:58 UTC
+**Commits**:
+- `023d62b` - Add dnspython dependency for DNS SRV lookups
+- (latest) - Add rate limit guard, remove retry loop on 7901
