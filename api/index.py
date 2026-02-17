@@ -422,10 +422,10 @@ def _setup_vehicle_manager_with_token(access_token, refresh_token, expire_in=864
             vehicle_manager.api.API_HEADERS["accessToken"] = access_token
             logger.info("Set accessToken directly on API headers as fallback")
 
-    # Update vehicles
+    # Fetch vehicle list (must be done before update - login() normally does this)
     try:
-        logger.info("Fetching vehicles after token setup...")
-        vehicle_manager.update_all_vehicles_with_cached_state()
+        logger.info("Fetching vehicle list after token setup...")
+        vehicle_manager.initialize_vehicles()
         if vehicle_manager.vehicles:
             logger.info(f"Found {len(vehicle_manager.vehicles)} vehicle(s)")
             if VEHICLE_ID is None:
@@ -434,6 +434,13 @@ def _setup_vehicle_manager_with_token(access_token, refresh_token, expire_in=864
                 logger.info(f"VEHICLE_ID set to: {VEHICLE_ID}")
         else:
             logger.warning("No vehicles found after token setup")
+    except Exception as init_err:
+        logger.error(f"Failed to fetch vehicles: {init_err}", exc_info=True)
+
+    # Update vehicle state (cached)
+    try:
+        logger.info("Updating vehicle state...")
+        vehicle_manager.update_all_vehicles_with_cached_state()
     except Exception as update_err:
         logger.error(f"Failed to update vehicles: {update_err}", exc_info=True)
 
