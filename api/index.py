@@ -97,6 +97,16 @@ otp_state = {
     "rate_limited_until": 0,  # Timestamp: don't attempt login until this time
 }
 
+# IMPORTANT: Use a STABLE device ID across all requests.
+# Generating a random UUID per request makes Kia think each request is a new device,
+# which triggers aggressive rate limiting (error 7901).
+import hashlib as _hashlib
+_STABLE_DEVICE_ID_BASE = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.102 Mobile Safari/537.36"
+# Derive a stable "UUID" from the username so the device ID is consistent
+_device_seed = os.environ.get("KIA_EMAIL", "") or os.environ.get("KIA_USERNAME", "") or "default"
+_STABLE_DEVICE_UUID = str(__import__('uuid').UUID(_hashlib.md5(_device_seed.encode()).hexdigest()))
+_STABLE_DEVICE_ID = f"{_STABLE_DEVICE_ID_BASE}+{_STABLE_DEVICE_UUID}"
+
 def manual_canada_send_otp(method="email", provided_xid=None):
     """
     Manually send OTP for Canada region using correct MFA flow.
@@ -120,12 +130,12 @@ def manual_canada_send_otp(method="email", provided_xid=None):
     # Use a session to preserve cookies across requests (CRITICAL!)
     session = requests.Session()
 
-    # Create headers directly (same as library uses for Canada)
-    base_device_id = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.102 Mobile Safari/537.36"
-    unique_device_id = f"{base_device_id}+{str(uuid.uuid4())}"
+    # Use STABLE device ID (defined at module level) - NOT a random UUID per request!
+    # Random UUIDs make Kia think each request is a new device → aggressive rate limiting
+    logger.info(f"Using stable device ID (UUID: {_STABLE_DEVICE_UUID})")
 
     headers = {
-        'User-Agent': base_device_id,
+        'User-Agent': _STABLE_DEVICE_ID_BASE,
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-CA,en-US;q=0.8,en;q=0.5,fr;q=0.3',
         'Accept-Encoding': 'gzip, deflate, br, zstd',
@@ -143,7 +153,7 @@ def manual_canada_send_otp(method="email", provided_xid=None):
         'Pragma': 'no-cache',
         'Cache-Control': 'no-cache',
         'client_id': 'HATAHSPACA0232141ED9722C67715A0B',
-        'Deviceid': base64.b64encode(unique_device_id.encode()).decode()
+        'Deviceid': base64.b64encode(_STABLE_DEVICE_ID.encode()).decode()
     }
 
     # Step 1: Check if we can reuse existing xid (either provided by client or from otp_state)
@@ -444,13 +454,11 @@ def init_vehicle_manager():
                     test_headers = copy.deepcopy(getattr(api, "API_HEADERS", {}))
                     test_headers.pop("accessToken", None)
 
-                    # Generate Deviceid like the library does (required for Canada since July 2025)
-                    base_device_id = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.102 Mobile Safari/537.36"
-                    unique_device_id = f"{base_device_id}+{str(uuid.uuid4())}"
-                    test_headers["Deviceid"] = base64.b64encode(unique_device_id.encode()).decode()
+                    # Use STABLE device ID (module-level) - random UUIDs trigger rate limiting
+                    test_headers["Deviceid"] = base64.b64encode(_STABLE_DEVICE_ID.encode()).decode()
 
                     # Add User-Agent header (the library sends this but API_HEADERS may not include it)
-                    test_headers["User-Agent"] = base_device_id
+                    test_headers["User-Agent"] = _STABLE_DEVICE_ID_BASE
                     # Use CWP instead of SPA for login (library uses CWP)
                     test_headers["from"] = "CWP"
 
