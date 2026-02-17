@@ -400,7 +400,33 @@ curl -X POST https://kia-android-widget.vercel.app/otp/send \
 
 ---
 
-**Last Updated**: 2026-02-17 14:58 UTC
+**Last Updated**: 2026-02-17 16:30 UTC
 **Commits**:
 - `023d62b` - Add dnspython dependency for DNS SRV lookups
-- (latest) - Add rate limit guard, remove retry loop on 7901
+- `8a64dec` - Add rate limit guard, remove retry loop on 7901
+- `36ac4b8` - Fix: use stable device ID instead of random UUID per request
+- `0571167` - **Major fix**: rewrite Canada MFA to match library API (PR #1033)
+
+---
+
+## 🔄 **Major Rewrite (2026-02-17 commit 0571167)**
+
+Validated entire MFA flow against the actual `hyundai_kia_connect_api` library source and PR #1033.
+
+### CRITICAL bugs fixed:
+| Bug | Old (broken) | New (correct) |
+|-----|-------------|---------------|
+| Login field name | `"userId"` | `"loginId"` |
+| Response parsing | `response["userInfoUuid"]` | `response["result"]["userInfoUuid"]` |
+| OTP validation field | `"otpValue"` | `"otpNo"` |
+| Token location | Response **headers** (sid, rmtoken) | Response **body** (result.token.accessToken) |
+| Missing header | No client_secret | `client_secret: "CLISCR01AHSPA"` |
+| xid/transactionId | Used in MFA flow | **NOT used** - data chains through bodies |
+| otpKey casing | Mixed `otpkey`/`otpKey` | Consistent `otpKey` |
+
+### Architecture fixes:
+- `/health` no longer triggers login (was eating rate limit budget)
+- `/otp/verify` no longer calls `init_vehicle_manager()` for Canada (avoided double login)
+- Removed diagnostic login attempt from `init_vehicle_manager` (was extra API call)
+- Session cookies shared across all 5 MFA steps
+- Added "device remembered" handling (login succeeds without OTP after mfaYn=Y)
