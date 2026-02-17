@@ -90,51 +90,34 @@ otp_state = {
     "sent": False,
     "verified": False,
     "error": None,
-    "otp_request": None,  # Stores OTP data from initial login
-    "xid": None,  # Transaction ID from error response
-    "xid_timestamp": 0,  # When xid was obtained
-    "otpkey": None,  # OTP key from error response
+    "otp_request": None,  # Stores OTPRequest from library login (USA flow)
+    "otpKey": None,  # OTP key from /mfa/sendotp (Canada flow)
+    "userInfoUuid": None,  # User info UUID from /mfa/selverifmeth
+    "mfaApiCode": "0107",  # Always "0107" for Canada
+    "session": None,  # requests.Session to preserve cookies across MFA steps
+    "headers": None,  # Headers used for MFA calls
     "rate_limited_until": 0,  # Timestamp: don't attempt login until this time
 }
+
+# ── Canada API Constants ──
+_MFA_API_CODE = "0107"
+_CANADA_API_BASE = "https://kiaconnect.ca/tods/api/"
 
 # IMPORTANT: Use a STABLE device ID across all requests.
 # Generating a random UUID per request makes Kia think each request is a new device,
 # which triggers aggressive rate limiting (error 7901).
 import hashlib as _hashlib
+import uuid as _uuid
+import base64 as _base64
 _STABLE_DEVICE_ID_BASE = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.102 Mobile Safari/537.36"
-# Derive a stable "UUID" from the username so the device ID is consistent
+# Derive a stable UUID from the username so the device ID is consistent
 _device_seed = os.environ.get("KIA_EMAIL", "") or os.environ.get("KIA_USERNAME", "") or "default"
-_STABLE_DEVICE_UUID = str(__import__('uuid').UUID(_hashlib.md5(_device_seed.encode()).hexdigest()))
+_STABLE_DEVICE_UUID = str(_uuid.UUID(_hashlib.md5(_device_seed.encode()).hexdigest()))
 _STABLE_DEVICE_ID = f"{_STABLE_DEVICE_ID_BASE}+{_STABLE_DEVICE_UUID}"
 
-def manual_canada_send_otp(method="email", provided_xid=None):
-    """
-    Manually send OTP for Canada region using correct MFA flow.
-
-    Based on PR #1033: https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/pull/1033
-
-    Args:
-        method: "email" or "sms"
-        provided_xid: Optional transaction ID from previous request to reuse (avoids new login)
-
-    Flow:
-    1. Login (error 7110) → get transactionId
-    2. /mfa/selverifmeth → get userInfoUuid, mfaApiCode
-    3. /mfa/sendotp → send OTP, get otpKey
-    """
-    import requests
-    import time
-    import uuid
-    import base64
-
-    # Use a session to preserve cookies across requests (CRITICAL!)
-    session = requests.Session()
-
-    # Use STABLE device ID (defined at module level) - NOT a random UUID per request!
-    # Random UUIDs make Kia think each request is a new device → aggressive rate limiting
-    logger.info(f"Using stable device ID (UUID: {_STABLE_DEVICE_UUID})")
-
-    headers = {
+def _build_canada_headers():
+    """Build headers matching the library's CCA API implementation."""
+    return {
         'User-Agent': _STABLE_DEVICE_ID_BASE,
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-CA,en-US;q=0.8,en;q=0.5,fr;q=0.3',
@@ -153,204 +136,299 @@ def manual_canada_send_otp(method="email", provided_xid=None):
         'Pragma': 'no-cache',
         'Cache-Control': 'no-cache',
         'client_id': 'HATAHSPACA0232141ED9722C67715A0B',
-        'Deviceid': base64.b64encode(_STABLE_DEVICE_ID.encode()).decode()
+        'client_secret': 'CLISCR01AHSPA',
+        'Deviceid': _base64.b64encode(_STABLE_DEVICE_ID.encode()).decode(),
     }
 
-    # Step 1: Check if we can reuse existing xid (either provided by client or from otp_state)
+def manual_canada_send_otp(method="email"):
+    """
+    Steps 1-3 of Canada MFA flow.
+    Based on PR #1033: https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/pull/1033
+
+    Flow:
+    1. Login → expect error 7110 (OTP required) OR success (device remembered)
+    2. /mfa/selverifmeth → get userInfoUuid
+    3. /mfa/sendotp → send OTP code, get otpKey
+
+    Note: transactionId/xid is NOT used in MFA - data chains through request bodies.
+    Session cookies ARE important and shared across all steps.
+    """
+    import requests
+    import time
+
+    # Use a session to preserve cookies across all MFA steps (CRITICAL!)
+    session = requests.Session()
+    headers = _build_canada_headers()
+
+    logger.info(f"Using stable device UUID: {_STABLE_DEVICE_UUID}")
+
     current_time = time.time()
 
-    # Option 1: Client provided xid (from previous request in different Lambda instance)
-    if provided_xid:
-        logger.info(f"Step 1: Using client-provided xid: {provided_xid}")
-        xid = provided_xid
-        otp_state["xid"] = xid
-        otp_state["xid_timestamp"] = current_time
-    # Option 2: Reuse recent xid from same Lambda instance (< 5 minutes)
-    elif otp_state.get("xid") and (current_time - otp_state.get("xid_timestamp", 0)) < 300:
-        xid = otp_state["xid"]
-        age = int(current_time - otp_state["xid_timestamp"])
-        logger.info(f"Step 1: Reusing cached xid (age: {age}s): {xid}")
-    # Option 3: Need fresh login - but check rate limit guard first
-    else:
-        # RATE LIMIT GUARD: If we recently got a 7901, refuse to hit the API
-        # This prevents us from resetting the rate limit timer with every request
-        rate_limited_until = otp_state.get("rate_limited_until", 0)
-        if current_time < rate_limited_until:
-            wait_minutes = int((rate_limited_until - current_time) / 60) + 1
-            raise Exception(
-                f"Rate limit cooldown active. Do NOT retry for {wait_minutes} more minutes. "
-                f"Cooldown expires at Unix timestamp {int(rate_limited_until)}. "
-                f"Each retry resets the timer! Just wait."
-            )
+    # RATE LIMIT GUARD: If we recently got a 7901, refuse to hit the API.
+    # This prevents us from resetting Kia's rate limit timer with every request.
+    rate_limited_until = otp_state.get("rate_limited_until", 0)
+    if current_time < rate_limited_until:
+        wait_minutes = int((rate_limited_until - current_time) / 60) + 1
+        raise Exception(
+            f"Rate limit cooldown active. Do NOT retry for {wait_minutes} more minutes. "
+            f"Each retry resets the timer! Just wait."
+        )
 
-        logger.info("Step 1: Triggering login to get error 7110 and session cookies...")
+    # ── Step 1: Login to trigger MFA (expect error 7110) ──
+    logger.info("Step 1: Logging in to trigger MFA (expect error 7110)...")
+    login_url = f"{_CANADA_API_BASE}v2/login"
+    login_data = {
+        "loginId": USERNAME,   # MUST be "loginId" not "userId" per library
+        "password": PASSWORD,
+    }
 
-        login_url = "https://kiaconnect.ca/tods/api/v2/login"
-        login_data = {
-            "userId": os.environ.get("KIA_EMAIL"),
-            "password": os.environ.get("KIA_PASSWORD")
+    # Single attempt - NO retries on 7901
+    login_response = session.post(login_url, json=login_data, headers=headers, timeout=10)
+    logger.info(f"Login response: {login_response.status_code}")
+
+    if login_response.status_code != 200:
+        raise Exception(f"Login failed with HTTP {login_response.status_code}")
+
+    login_json = login_response.json()
+    response_code = login_json.get("responseHeader", {}).get("responseCode")
+    error_code = login_json.get("error", {}).get("errorCode")
+
+    if response_code == 0:
+        # Login succeeded WITHOUT OTP - device is remembered (within 90-day window)
+        token_data = login_json.get("result", {}).get("token", {})
+        logger.info("Login succeeded without OTP! Device is remembered.")
+        otp_state["rate_limited_until"] = 0
+        # Store tokens for use - no OTP flow needed
+        return {
+            "no_otp_needed": True,
+            "token": token_data,
         }
 
-        # NO RETRIES on 7901 - retrying resets the rate limit timer!
-        login_response = session.post(login_url, json=login_data, headers=headers, timeout=10)
-        logger.info(f"Login response: {login_response.status_code}")
+    if error_code == "7901":
+        # Rate limited - set 35-minute cooldown, do NOT retry
+        cooldown_seconds = 35 * 60
+        otp_state["rate_limited_until"] = current_time + cooldown_seconds
+        cooldown_expires = time.strftime('%H:%M UTC', time.gmtime(current_time + cooldown_seconds))
+        raise Exception(
+            f"Rate limited (error 7901). Cooldown set for 35 minutes. "
+            f"Do NOT retry until {cooldown_expires}. "
+            f"Each login attempt resets the rate limit timer!"
+        )
 
-        if login_response.status_code == 200:
-            response_json = login_response.json()
-            error_code = response_json.get("error", {}).get("errorCode")
+    if error_code != "7110":
+        raise Exception(
+            f"Expected error 7110 (OTP required) but got: "
+            f"responseCode={response_code}, errorCode={error_code}, body={login_json}"
+        )
 
-            if error_code == "7110":
-                xid = login_response.headers.get("transactionId")
-                if xid:
-                    otp_state["xid"] = xid
-                    otp_state["xid_timestamp"] = current_time
-                    otp_state["rate_limited_until"] = 0  # Clear any cooldown
-                    logger.info(f"Got xid from login: {xid}")
-                else:
-                    raise Exception("Error 7110 but no transactionId in headers")
+    # Got error 7110 - OTP required, proceed to Step 2
+    logger.info("Got error 7110 - OTP required. Proceeding to MFA flow...")
+    otp_state["rate_limited_until"] = 0  # Clear any cooldown
 
-            elif error_code == "7901":
-                # Rate limited! Set a 35-minute cooldown to let it clear
-                # DO NOT RETRY - each attempt resets the timer
-                cooldown_seconds = 35 * 60  # 35 minutes
-                otp_state["rate_limited_until"] = current_time + cooldown_seconds
-                cooldown_expires = time.strftime('%H:%M UTC', time.gmtime(current_time + cooldown_seconds))
-                raise Exception(
-                    f"Rate limited (error 7901). Cooldown set for 35 minutes. "
-                    f"Do NOT retry until {cooldown_expires}. "
-                    f"Each login attempt resets the rate limit timer!"
-                )
-            else:
-                raise Exception(f"Expected error 7110 but got error code: {error_code}, response: {response_json}")
-        else:
-            raise Exception(f"Login failed with HTTP {login_response.status_code}")
-
-    # Step 2: Select verification method to get userInfoUuid
-    logger.info("Step 2: Calling /mfa/selverifmeth to get userInfoUuid...")
-    selverif_url = "https://kiaconnect.ca/tods/api/mfa/selverifmeth"
-
+    # ── Step 2: Select verification method → get userInfoUuid ──
+    logger.info("Step 2: Calling /mfa/selverifmeth...")
+    selverif_url = f"{_CANADA_API_BASE}mfa/selverifmeth"
     selverif_data = {
-        "mfaApiCode": "0107",  # Always "0107" for Canada per PR #1033
-        "userAccount": os.environ.get("KIA_EMAIL")
+        "mfaApiCode": _MFA_API_CODE,
+        "userAccount": USERNAME,
     }
 
     selverif_response = session.post(selverif_url, json=selverif_data, headers=headers, timeout=10)
     logger.info(f"selverifmeth response: {selverif_response.status_code}")
-    logger.info(f"Response: {selverif_response.text[:500]}")
+    selverif_json = selverif_response.json()
+    logger.info(f"selverifmeth body: {str(selverif_json)[:500]}")
 
     if selverif_response.status_code != 200:
-        raise Exception(f"selverifmeth failed: {selverif_response.status_code} - {selverif_response.text[:500]}")
+        raise Exception(f"selverifmeth failed: HTTP {selverif_response.status_code}")
 
-    selverif_result = selverif_response.json()
+    # Parse result wrapper (library format: response["result"]["userInfoUuid"])
+    selverif_result = selverif_json.get("result", selverif_json)  # Fallback to root if no wrapper
     user_info_uuid = selverif_result.get("userInfoUuid")
-    user_account_list = selverif_result.get("userAccount")  # List of email addresses
+    email_list = selverif_result.get("emailList", [])
 
     if not user_info_uuid:
-        raise Exception(f"Missing userInfoUuid in response: {selverif_result}")
+        raise Exception(f"Missing userInfoUuid in response: {selverif_json}")
 
-    logger.info(f"Got userInfoUuid: {user_info_uuid[:10]}...")
-    logger.info(f"Available accounts: {user_account_list}")
-    otp_state["userInfoUuid"] = user_info_uuid
-    otp_state["mfaApiCode"] = "0107"  # Store for later steps
+    logger.info(f"Got userInfoUuid: {user_info_uuid[:10]}..., emails: {email_list}")
 
-    # Step 3: Send OTP
-    logger.info(f"Step 3: Sending OTP via {method} to /mfa/sendotp...")
-    sendotp_url = "https://kiaconnect.ca/tods/api/mfa/sendotp"
-
+    # ── Step 3: Send OTP ──
+    logger.info(f"Step 3: Sending OTP via {method}...")
+    sendotp_url = f"{_CANADA_API_BASE}mfa/sendotp"
     sendotp_data = {
-        "otpMethod": "E" if method == "email" else "S",  # E=email, S=SMS
-        "mfaApiCode": "0107",
-        "userAccount": os.environ.get("KIA_EMAIL"),
-        "userPhone": "",  # Empty for email
-        "userInfoUuid": user_info_uuid
+        "otpMethod": "E" if method == "email" else "S",
+        "mfaApiCode": _MFA_API_CODE,
+        "userAccount": USERNAME,
+        "userPhone": "",
+        "userInfoUuid": user_info_uuid,
     }
 
     sendotp_response = session.post(sendotp_url, json=sendotp_data, headers=headers, timeout=10)
     logger.info(f"sendotp response: {sendotp_response.status_code}")
-    logger.info(f"Response: {sendotp_response.text[:500]}")
+    sendotp_json = sendotp_response.json()
+    logger.info(f"sendotp body: {str(sendotp_json)[:500]}")
 
     if sendotp_response.status_code != 200:
-        raise Exception(f"sendotp failed: {sendotp_response.status_code} - {sendotp_response.text[:500]}")
+        raise Exception(f"sendotp failed: HTTP {sendotp_response.status_code}")
 
-    sendotp_result = sendotp_response.json()
+    # Parse result wrapper
+    sendotp_result = sendotp_json.get("result", sendotp_json)
     otp_key = sendotp_result.get("otpKey")
 
     if not otp_key:
-        raise Exception(f"Missing otpKey in response: {sendotp_result}")
+        raise Exception(f"Missing otpKey in response: {sendotp_json}")
 
-    logger.info(f"OTP sent! otpKey: {otp_key[:10]}...")
+    logger.info(f"OTP sent! otpKey: {otp_key[:20]}...")
+
+    # Store state for verify step (shared session preserves cookies!)
     otp_state["otpKey"] = otp_key
+    otp_state["userInfoUuid"] = user_info_uuid
+    otp_state["session"] = session    # Preserve cookies for Steps 4-5
+    otp_state["headers"] = headers    # Preserve headers for Steps 4-5
 
-    return sendotp_result
+    return sendotp_json
 
-def manual_canada_verify_otp(api, otp_code):
+def manual_canada_verify_otp(otp_code):
     """
-    Manually verify OTP for Canada region using correct MFA flow.
+    Steps 4-5 of Canada MFA flow.
+    Based on PR #1033: https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/pull/1033
 
     Flow:
     4. /mfa/validateotp → validate code, get otpValidationKey
-    5. /mfa/genmfatkn → generate tokens (sid, rmtoken)
+    5. /mfa/genmfatkn → generate tokens (accessToken, refreshToken in BODY)
 
-    Returns (sid, rmtoken) tuple on success.
+    Returns (access_token, refresh_token, expire_in) tuple on success.
+
+    Note: Does NOT require VehicleManager. Uses stored session from send_otp.
     """
     import requests
 
     if not otp_state.get("otpKey"):
         raise Exception("Missing otpKey. Call /otp/send first.")
 
-    headers = api.API_HEADERS.copy()
+    # Reuse session from send_otp if available (preserves cookies from Steps 1-3)
+    session = otp_state.get("session") or requests.Session()
+    headers = otp_state.get("headers") or _build_canada_headers()
 
-    # Step 4: Validate OTP code
-    logger.info("Step 4: Validating OTP code with /mfa/validateotp...")
-    validateotp_url = "https://kiaconnect.ca/tods/api/mfa/validateotp"
-
+    # ── Step 4: Validate OTP code ──
+    logger.info("Step 4: Validating OTP with /mfa/validateotp...")
+    validateotp_url = f"{_CANADA_API_BASE}mfa/validateotp"
     validateotp_data = {
+        "otpNo": otp_code,           # MUST be "otpNo" not "otpValue" per library
         "otpKey": otp_state["otpKey"],
-        "otpValue": otp_code
+        "userAccount": USERNAME,
     }
 
-    validateotp_response = requests.post(validateotp_url, json=validateotp_data, headers=headers, timeout=10)
-    logger.info(f"validateotp response: {validateotp_response.status_code}")
-    logger.info(f"Response: {validateotp_response.text[:500]}")
+    validate_response = session.post(validateotp_url, json=validateotp_data, headers=headers, timeout=10)
+    logger.info(f"validateotp response: {validate_response.status_code}")
+    validate_json = validate_response.json()
+    logger.info(f"validateotp body: {str(validate_json)[:500]}")
 
-    if validateotp_response.status_code != 200:
-        raise Exception(f"validateotp failed: {validateotp_response.status_code} - {validateotp_response.text[:500]}")
+    if validate_response.status_code != 200:
+        raise Exception(f"validateotp failed: HTTP {validate_response.status_code}")
 
-    validateotp_result = validateotp_response.json()
-    otp_validation_key = validateotp_result.get("otpValidationKey")
+    # Parse result wrapper
+    validate_result = validate_json.get("result", validate_json)
+
+    # Check for errors in response
+    resp_code = validate_json.get("responseHeader", {}).get("responseCode")
+    if resp_code == 1:
+        error_info = validate_json.get("error", {})
+        raise Exception(f"OTP validation failed: {error_info}")
+
+    otp_validation_key = validate_result.get("otpValidationKey")
+    verified = validate_result.get("verifiedOtp", False)
 
     if not otp_validation_key:
-        raise Exception(f"Missing otpValidationKey in response: {validateotp_result}")
+        raise Exception(f"Missing otpValidationKey in response: {validate_json}")
 
-    logger.info(f"OTP validated! otpValidationKey: {otp_validation_key[:10]}...")
+    logger.info(f"OTP validated! verifiedOtp={verified}, key: {otp_validation_key[:20]}...")
 
-    # Step 5: Generate MFA tokens
+    # ── Step 5: Generate MFA tokens ──
     logger.info("Step 5: Generating tokens with /mfa/genmfatkn...")
-    genmfatkn_url = "https://kiaconnect.ca/tods/api/mfa/genmfatkn"
-
+    genmfatkn_url = f"{_CANADA_API_BASE}mfa/genmfatkn"
     genmfatkn_data = {
         "otpValidationKey": otp_validation_key,
-        "mfaYn": "Y",  # Y = remember device for 90 days
-        "mfaApiCode": otp_state.get("mfaApiCode")
+        "mfaYn": "Y",              # Remember device for 90 days
+        "mfaApiCode": _MFA_API_CODE,
     }
 
-    genmfatkn_response = requests.post(genmfatkn_url, json=genmfatkn_data, headers=headers, timeout=10)
-    logger.info(f"genmfatkn response: {genmfatkn_response.status_code}")
-    logger.info(f"Response headers: {dict(genmfatkn_response.headers)}")
-    logger.info(f"Response: {genmfatkn_response.text[:500]}")
+    token_response = session.post(genmfatkn_url, json=genmfatkn_data, headers=headers, timeout=10)
+    logger.info(f"genmfatkn response: {token_response.status_code}")
+    token_json = token_response.json()
+    logger.info(f"genmfatkn body: {str(token_json)[:500]}")
 
-    if genmfatkn_response.status_code != 200:
-        raise Exception(f"genmfatkn failed: {genmfatkn_response.status_code} - {genmfatkn_response.text[:500]}")
+    if token_response.status_code != 200:
+        raise Exception(f"genmfatkn failed: HTTP {token_response.status_code}")
 
-    # Extract tokens from response headers
-    sid = genmfatkn_response.headers.get("sid")
-    rmtoken = genmfatkn_response.headers.get("rmtoken")
+    # Tokens come from response BODY (result.token), NOT from headers!
+    token_result = token_json.get("result", token_json)
+    token_data = token_result.get("token", {})
+    access_token = token_data.get("accessToken")
+    refresh_token = token_data.get("refreshToken")
+    expire_in = token_data.get("expireIn", 86400)
 
-    if not sid or not rmtoken:
-        raise Exception(f"Missing sid/rmtoken in headers: {dict(genmfatkn_response.headers)}")
+    if not access_token or not refresh_token:
+        raise Exception(f"Missing tokens in response body: {token_json}")
 
-    logger.info("Successfully generated tokens!")
-    return sid, rmtoken
+    logger.info(f"Tokens generated! accessToken: {access_token[:20]}..., expireIn: {expire_in}s")
+    return access_token, refresh_token, expire_in
+
+def _setup_vehicle_manager_with_token(access_token, refresh_token, expire_in=86400):
+    """
+    Create VehicleManager and set token from manual MFA flow.
+    Called after successful OTP verification or when device is remembered.
+    Does NOT call login() - we already have tokens.
+    """
+    global vehicle_manager, VEHICLE_ID
+    from hyundai_kia_connect_api import VehicleManager
+    from datetime import datetime, timezone, timedelta
+
+    logger.info("Setting up VehicleManager with obtained tokens...")
+
+    vehicle_manager = VehicleManager(
+        region=REGION,
+        brand=BRAND_KIA,
+        username=USERNAME,
+        password=PASSWORD,
+        pin=str(PIN),
+    )
+
+    # Create Token and assign it - skip login entirely
+    try:
+        from hyundai_kia_connect_api.ApiImpl import Token
+        token = Token(
+            username=USERNAME,
+            password=PASSWORD,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            valid_until=datetime.now(timezone.utc) + timedelta(seconds=expire_in),
+            device_id=getattr(vehicle_manager.api, 'device_id', _STABLE_DEVICE_UUID),
+            pin=PIN,
+        )
+        vehicle_manager.token = token
+        logger.info(f"Token set on VehicleManager (expires in {expire_in}s)")
+    except Exception as token_err:
+        logger.error(f"Failed to create Token object: {token_err}")
+        # Try setting access token directly on the API as fallback
+        if hasattr(vehicle_manager, 'api') and hasattr(vehicle_manager.api, 'API_HEADERS'):
+            vehicle_manager.api.API_HEADERS["accessToken"] = access_token
+            logger.info("Set accessToken directly on API headers as fallback")
+
+    # Update vehicles
+    try:
+        logger.info("Fetching vehicles after token setup...")
+        vehicle_manager.update_all_vehicles_with_cached_state()
+        if vehicle_manager.vehicles:
+            logger.info(f"Found {len(vehicle_manager.vehicles)} vehicle(s)")
+            if VEHICLE_ID is None:
+                env_vid = os.environ.get("VEHICLE_ID", "").strip()
+                VEHICLE_ID = env_vid if env_vid else next(iter(vehicle_manager.vehicles.keys()))
+                logger.info(f"VEHICLE_ID set to: {VEHICLE_ID}")
+        else:
+            logger.warning("No vehicles found after token setup")
+    except Exception as update_err:
+        logger.error(f"Failed to update vehicles: {update_err}", exc_info=True)
+
 
 def init_vehicle_manager():
     """Initialize vehicle manager lazily on first request."""
@@ -434,78 +512,17 @@ def init_vehicle_manager():
 
             except Exception as auth_error:
                 logger.error(f"Authentication error: {auth_error}")
-
-                # For other errors, log but try to continue
-                logger.error(f"Authentication error (will retry on next request): {auth_error}")
                 otp_state["error"] = str(auth_error)
+                otp_state["required"] = True
+                otp_state["verified"] = False
 
-                # Still try to diagnose
-                logger.info("Attempting direct API call to diagnose...")
-                try:
-                    import copy
-                    import uuid
-                    import base64
-                    import requests
-
-                    api = vehicle_manager.api
-                    test_url = api.API_URL + "v2/login"
-
-                    # Mirror the same headers the library sends to avoid validation errors
-                    test_headers = copy.deepcopy(getattr(api, "API_HEADERS", {}))
-                    test_headers.pop("accessToken", None)
-
-                    # Use STABLE device ID (module-level) - random UUIDs trigger rate limiting
-                    test_headers["Deviceid"] = base64.b64encode(_STABLE_DEVICE_ID.encode()).decode()
-
-                    # Add User-Agent header (the library sends this but API_HEADERS may not include it)
-                    test_headers["User-Agent"] = _STABLE_DEVICE_ID_BASE
-                    # Use CWP instead of SPA for login (library uses CWP)
-                    test_headers["from"] = "CWP"
-
-                    test_data = {"loginId": USERNAME, "password": PASSWORD}
-
-                    # Log headers (excluding secrets) to verify Deviceid is present
-                    safe_headers = {k: (v[:20] + "..." if k == "Deviceid" else v)
-                                   for k, v in test_headers.items()
-                                   if k.lower() != "client_secret"}
-                    logger.info(f"Direct API test - Headers with Deviceid: {safe_headers}")
-
-                    test_response = requests.post(test_url, json=test_data, headers=test_headers, timeout=10)
-                    logger.info(
-                        "Direct API test - Status: %s | URL: %s",
-                        test_response.status_code,
-                        test_url,
-                    )
-                    logger.info(f"Direct API test - Response headers: {dict(test_response.headers)}")
-                    logger.info(f"Direct API test - Body (first 500 chars): {test_response.text[:500]}")
-
-                    # Check for error 7110 (OTP required) and extract OTP context
-                    response_json = test_response.json()
-                    error_code = response_json.get("error", {}).get("errorCode")
-
-                    if error_code == "7110":
-                        logger.warning("Error 7110 detected - OTP/2FA required")
-
-                        # Extract OTP context from response headers
-                        xid = test_response.headers.get("transactionId")
-                        status_header = test_response.headers.get("status")
-
-                        if xid and status_header == "7110":
-                            otp_state["xid"] = xid
-                            otp_state["required"] = True
-                            otp_state["verified"] = False
-                            logger.info(f"OTP context extracted - xid: {xid}, status: {status_header}")
-                            logger.info("Will use manual Canada OTP flow (otpkey not needed)")
-                        else:
-                            logger.warning("Error 7110 but missing OTP context in headers")
-
-                except Exception as test_error:
-                    logger.error(f"Direct API test failed: {test_error}")
-
-                # Don't fail initialization - allow OTP flow to complete
-                # The user can call /otp/send and /otp/verify to complete auth
-                logger.warning("Initialization continuing despite auth error - OTP may be required")
-                logger.info("VehicleManager created but not authenticated. Use /otp/status to check requirements.")
+                # Do NOT make diagnostic login attempts - they waste rate limit budget.
+                # The user should call /otp/send to start the manual Canada MFA flow.
+                logger.warning(
+                    "Auth failed (likely OTP required). "
+                    "Use POST /otp/send to start manual MFA flow. "
+                    "Do NOT call init_vehicle_manager again until OTP is verified."
+                )
                 # Return True to allow OTP endpoints to work (skip vehicle update)
                 return True
 
@@ -631,22 +648,26 @@ def log_request_info():
 # ── Health Check Endpoint ──
 @app.route('/health', methods=['GET'])
 def health():
-    """Health check endpoint for monitoring."""
-    initialized = init_vehicle_manager()
+    """Health check endpoint for monitoring.
+    Does NOT trigger login/init - just reports current state.
+    """
+    is_initialized = vehicle_manager is not None and VEHICLE_ID is not None
+    otp_needed = otp_state.get("required", False) and not otp_state.get("verified", False)
 
     response = {
-        "status": "healthy" if initialized else "degraded",
+        "status": "healthy" if is_initialized else ("otp_required" if otp_needed else "not_initialized"),
         "timestamp": datetime.now(ZoneInfo("America/Toronto")).isoformat(),
-        "vehicles_count": len(vehicle_manager.vehicles) if vehicle_manager else 0,
+        "vehicles_count": len(vehicle_manager.vehicles) if vehicle_manager and vehicle_manager.vehicles else 0,
         "vehicle_manager_initialized": vehicle_manager is not None,
         "vehicle_id_set": VEHICLE_ID is not None,
-        "vehicle_id": VEHICLE_ID if VEHICLE_ID else "not set"
+        "otp_required": otp_needed,
+        "otp_verified": otp_state.get("verified", False),
     }
 
-    if initialized and vehicle_manager:
+    if is_initialized and vehicle_manager and vehicle_manager.vehicles:
         response["vehicles"] = list(vehicle_manager.vehicles.keys())
 
-    return jsonify(response), 200 if initialized else 503
+    return jsonify(response), 200
 
 # ── Root Endpoint ──
 @app.route('/', methods=['GET'])
@@ -704,17 +725,16 @@ def diagnostics():
 @app.route('/otp/send', methods=['POST'])
 def send_otp():
     """
-    Request OTP to be sent via SMS/email.
+    Request OTP to be sent via email.
+    Does NOT require VehicleManager for Canada - uses manual MFA flow.
 
-    Body:
-        {"method": "sms"} or {"method": "email"}
-        Optional: {"xid": "4091163502"} to reuse existing transaction ID
+    Body: {"method": "email"}
+    Note: Canada only supports email OTP, not SMS.
     """
     global vehicle_manager
 
     data = request.get_json() or {}
-    method = data.get("method", "sms").lower()
-    provided_xid = data.get("xid")  # Optional: client can pass xid to reuse
+    method = data.get("method", "email").lower()
 
     if method not in ["sms", "email"]:
         return jsonify({"error": "Method must be 'sms' or 'email'"}), 400
@@ -722,7 +742,7 @@ def send_otp():
     try:
         logger.info(f"Requesting OTP via {method}...")
 
-        # Check if we have library OTPRequest (USA) or manual Canada OTP context
+        # Check if we have library OTPRequest (USA) or need manual Canada flow
         if otp_state.get("otp_request") is not None:
             # USA region - use library's OTP support (requires VehicleManager)
             if vehicle_manager is None:
@@ -738,11 +758,29 @@ def send_otp():
             logger.info(f"send_otp() returned: {result}")
 
         else:
-            # Canada region - use manual MFA flow (INDEPENDENT - no VehicleManager needed!)
-            # This avoids rate limiting (error 7901) from double login
+            # Canada region - use manual MFA flow (NO VehicleManager needed!)
             logger.info("Using manual Canada MFA flow (no VehicleManager init needed)...")
-            result = manual_canada_send_otp(method, provided_xid)
-            logger.info(f"Manual send_otp() returned: {result}")
+            result = manual_canada_send_otp(method)
+
+            # Handle case where device is remembered (no OTP needed)
+            if isinstance(result, dict) and result.get("no_otp_needed"):
+                logger.info("Device is remembered - no OTP needed! Setting up tokens...")
+                token_data = result.get("token", {})
+                # Initialize vehicle manager with these tokens
+                _setup_vehicle_manager_with_token(
+                    token_data.get("accessToken"),
+                    token_data.get("refreshToken"),
+                    token_data.get("expireIn", 86400),
+                )
+                otp_state["verified"] = True
+                otp_state["required"] = False
+                return jsonify({
+                    "status": "authenticated",
+                    "message": "Device remembered - no OTP needed. API is ready to use.",
+                    "region": "Canada (manual)",
+                }), 200
+
+            logger.info(f"Manual send_otp() returned: {str(result)[:200]}")
 
         otp_state["sent"] = True
         otp_state["required"] = True
@@ -750,9 +788,8 @@ def send_otp():
         return jsonify({
             "status": "OTP sent",
             "method": method,
-            "message": f"Check your {method} for the OTP code, then call POST /otp/verify",
+            "message": f"Check your {method} for the OTP code, then call POST /otp/verify with {{\"otp\": \"123456\"}}",
             "region": "USA (library)" if otp_state.get("otp_request") else "Canada (manual)",
-            "xid": otp_state.get("xid")  # Return xid so client can reuse it
         }), 200
     except Exception as e:
         logger.error(f"Failed to send OTP: {e}", exc_info=True)
@@ -768,12 +805,6 @@ def verify_otp():
     """
     global vehicle_manager
 
-    # Initialize if needed (serverless instances don't persist state)
-    if vehicle_manager is None:
-        logger.info("VehicleManager not initialized, initializing now...")
-        if not init_vehicle_manager():
-            return jsonify({"error": "Failed to initialize vehicle manager"}), 503
-
     data = request.get_json() or {}
     otp = data.get("otp", "").strip()
 
@@ -788,7 +819,12 @@ def verify_otp():
 
         # Check if we have library OTPRequest (USA) or manual Canada OTP context
         if otp_state.get("otp_request") is not None:
-            # USA region - use library's OTP support
+            # USA region - use library's OTP support (requires VehicleManager)
+            if vehicle_manager is None:
+                logger.info("VehicleManager not initialized, initializing now...")
+                if not init_vehicle_manager():
+                    return jsonify({"error": "Failed to initialize vehicle manager"}), 503
+
             logger.info("Using USA OTP verification flow...")
             token = vehicle_manager.api.verify_otp_and_complete_login(
                 username=USERNAME,
@@ -801,45 +837,33 @@ def verify_otp():
             vehicle_manager.token = token
 
         elif otp_state.get("otpKey"):
-            # Canada region - use manual MFA verification flow
+            # Canada region - manual MFA verification (Steps 4-5)
+            # Does NOT need VehicleManager - uses stored session from send_otp
             logger.info("Using manual Canada MFA verification flow...")
-            sid, rmtoken = manual_canada_verify_otp(vehicle_manager.api, otp)
-            logger.info(f"OTP verified! sid: {sid[:20] if sid else None}..., rmtoken: {rmtoken[:20] if rmtoken else None}...")
+            access_token, refresh_token, expire_in = manual_canada_verify_otp(otp)
+            logger.info(f"OTP verified! accessToken: {access_token[:20]}...")
 
-            # Create token manually (Canada doesn't have verify_otp_and_complete_login)
-            from hyundai_kia_connect_api.ApiImpl import Token
-            from datetime import datetime, timezone, timedelta
-
-            token = Token(
-                username=USERNAME,
-                password=PASSWORD,
-                access_token=sid,
-                refresh_token=rmtoken,
-                valid_until=datetime.now(timezone.utc) + timedelta(hours=24),
-                device_id=vehicle_manager.api.device_id,
-                pin=PIN
-            )
-            vehicle_manager.token = token
+            # Now set up VehicleManager with the obtained tokens
+            _setup_vehicle_manager_with_token(access_token, refresh_token, expire_in)
 
         else:
-            return jsonify({"error": "No OTP context available. Call /otp/send first"}), 400
+            return jsonify({"error": "No OTP context available. Call /otp/send first."}), 400
 
         otp_state["verified"] = True
         otp_state["required"] = False
         otp_state["otp_request"] = None
-        otp_state["xid"] = None
-        otp_state["otpkey"] = None
+        otp_state["otpKey"] = None
+        otp_state["session"] = None
+        otp_state["headers"] = None
 
-        # Now initialize vehicles
-        logger.info("Initializing vehicles after OTP verification...")
-        vehicle_manager.initialize_vehicles()
-        vehicle_manager.update_all_vehicles_with_cached_state()
+        vehicles_found = 0
+        if vehicle_manager and vehicle_manager.vehicles:
+            vehicles_found = len(vehicle_manager.vehicles)
 
         return jsonify({
             "status": "OTP verified",
             "message": "Authentication complete. You can now use the API normally.",
-            "vehicles_found": len(vehicle_manager.vehicles) if vehicle_manager.vehicles else 0,
-            "region": "USA (library)" if otp_state.get("otp_request") else "Canada (manual)"
+            "vehicles_found": vehicles_found,
         }), 200
     except Exception as e:
         logger.error(f"Failed to verify OTP: {e}", exc_info=True)
