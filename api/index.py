@@ -316,6 +316,7 @@ def manual_canada_verify_otp(otp_code):
         "otpNo": otp_code,           # MUST be "otpNo" not "otpValue" per library
         "otpKey": otp_state["otpKey"],
         "userAccount": USERNAME,
+        "mfaApiCode": _MFA_API_CODE,  # Required: "0107" for Canada
     }
 
     validate_response = session.post(validateotp_url, json=validateotp_data, headers=headers, timeout=10)
