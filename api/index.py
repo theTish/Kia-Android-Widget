@@ -351,6 +351,8 @@ def manual_canada_verify_otp(otp_code):
         "otpValidationKey": otp_validation_key,
         "mfaYn": "Y",              # Remember device for 90 days
         "mfaApiCode": _MFA_API_CODE,
+        "userAccount": USERNAME,
+        "otpEmail": USERNAME,      # Email address where OTP was sent
     }
 
     token_response = session.post(genmfatkn_url, json=genmfatkn_data, headers=headers, timeout=10)
@@ -360,6 +362,11 @@ def manual_canada_verify_otp(otp_code):
 
     if token_response.status_code != 200:
         raise Exception(f"genmfatkn failed: HTTP {token_response.status_code}")
+
+    # Check for API-level error (e.g. 7725 = missing required fields)
+    if token_json.get("responseHeader", {}).get("responseCode") == 1:
+        error_info = token_json.get("error", {})
+        raise Exception(f"genmfatkn failed: {error_info}")
 
     # Tokens come from response BODY (result.token), NOT from headers!
     token_result = token_json.get("result", token_json)
