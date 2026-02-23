@@ -495,50 +495,137 @@ def init_vehicle_manager():
                 # OTP is handled via send_otp() and verify_otp() methods
             )
 
-            logger.info("Attempting to authenticate...")
+            logger.info("Attempting to authenticate using manual device-trust login...")
 
-            # Try to authenticate - login() returns either Token or OTPRequest
+            # Use manual Canada MFA flow with device trust - same as /otp/send
+            # This allows device recognition to work, avoiding OTP when possible
             try:
-                login_result = vehicle_manager.login()
+                import requests
+                import time
 
-                # Check if OTP is required
-                if isinstance(login_result, OTPRequest):
-                    logger.warning("OTP/2FA required for authentication")
-                    logger.info(f"OTP methods available - Email: {login_result.has_email}, SMS: {login_result.has_sms}")
-                    if login_result.email:
-                        logger.info(f"OTP can be sent to email: {login_result.email}")
-                    if login_result.sms:
-                        logger.info(f"OTP can be sent to SMS: {login_result.sms}")
+                session = requests.Session()
+                headers = _build_canada_headers()
 
-                    # Store the OTPRequest for later use
+                logger.info(f"Using stable device UUID: {_STABLE_DEVICE_UUID}")
+
+                # Check rate limit cooldown
+                current_time = time.time()
+                rate_limited_until = otp_state.get("rate_limited_until", 0)
+                if current_time < rate_limited_until:
+                    wait_minutes = int((rate_limited_until - current_time) / 60) + 1
+                    logger.error(
+                        f"Rate limit cooldown active. Wait {wait_minutes} more minutes. "
+                        f"Use POST /otp/send when cooldown expires."
+                    )
                     otp_state["required"] = True
                     otp_state["verified"] = False
-                    otp_state["otp_request"] = login_result
-                    otp_state["error"] = "OTP required - call POST /otp/send to start authentication"
-
-                    logger.info("VehicleManager initialized but authentication pending OTP verification")
                     return True
 
-                # Login successful without OTP
-                logger.info("Authentication successful (no OTP required)")
-                otp_state["required"] = False
-                otp_state["verified"] = True
-                otp_state["otp_request"] = None
+                # Step 1: Login with device trust params
+                login_url = f"{_CANADA_API_BASE}v2/login"
+                login_data = {
+                    "loginId": USERNAME,
+                    "password": PASSWORD,
+                    "mfaYn": "Y",  # Enable device trust
+                }
+
+                login_response = session.post(login_url, json=login_data, headers=headers, timeout=10)
+                logger.info(f"Manual login response: {login_response.status_code}")
+
+                if login_response.status_code != 200:
+                    raise Exception(f"Login failed with HTTP {login_response.status_code}")
+
+                login_json = login_response.json()
+                response_code = login_json.get("responseHeader", {}).get("responseCode")
+                error_code = login_json.get("error", {}).get("errorCode")
+
+                if response_code == 0:
+                    # SUCCESS: Device is remembered! Set up token and continue.
+                    token_data = login_json.get("result", {}).get("token", {})
+                    logger.info("✓ Device is remembered - login succeeded without OTP!")
+                    otp_state["rate_limited_until"] = 0
+                    otp_state["required"] = False
+                    otp_state["verified"] = True
+
+                    # Set up token on the already-created VehicleManager
+                    access_token = token_data.get("accessToken")
+                    refresh_token = token_data.get("refreshToken")
+                    expire_in = token_data.get("expireIn", 86400)
+
+                    if not access_token or not refresh_token:
+                        raise Exception(f"Missing tokens in response: {login_json}")
+
+                    # Create Token and assign it
+                    try:
+                        from hyundai_kia_connect_api.ApiImpl import Token
+                        from datetime import datetime, timezone, timedelta
+                        token = Token(
+                            username=USERNAME,
+                            password=PASSWORD,
+                            access_token=access_token,
+                            refresh_token=refresh_token,
+                            valid_until=datetime.now(timezone.utc) + timedelta(seconds=expire_in),
+                            device_id=getattr(vehicle_manager.api, 'device_id', _STABLE_DEVICE_UUID),
+                            pin=PIN,
+                        )
+                        vehicle_manager.token = token
+                        logger.info(f"Token set on VehicleManager (expires in {expire_in}s)")
+                    except Exception as token_err:
+                        logger.error(f"Failed to create Token object: {token_err}")
+                        # Fallback: set access token directly
+                        if hasattr(vehicle_manager, 'api') and hasattr(vehicle_manager.api, 'API_HEADERS'):
+                            vehicle_manager.api.API_HEADERS["accessToken"] = access_token
+                            logger.info("Set accessToken directly on API headers as fallback")
+
+                    # Now that we have a token, initialize vehicles
+                    # (This is normally done by login() in the library)
+                    logger.info("Fetching vehicle list after manual login...")
+                    try:
+                        vehicle_manager.initialize_vehicles()
+                        if vehicle_manager.vehicles:
+                            logger.info(f"Found {len(vehicle_manager.vehicles)} vehicle(s)")
+                        else:
+                            logger.warning("No vehicles found after initialization")
+                    except Exception as init_err:
+                        logger.error(f"Failed to fetch vehicles: {init_err}", exc_info=True)
+
+                elif error_code == "7901":
+                    # Rate limited - set 35-minute cooldown
+                    cooldown_seconds = 35 * 60
+                    otp_state["rate_limited_until"] = current_time + cooldown_seconds
+                    cooldown_expires = time.strftime('%H:%M UTC', time.gmtime(current_time + cooldown_seconds))
+                    logger.error(
+                        f"Rate limited (error 7901). Cooldown set for 35 minutes until {cooldown_expires}. "
+                        f"Use POST /otp/send when cooldown expires."
+                    )
+                    otp_state["required"] = True
+                    otp_state["verified"] = False
+                    return True
+
+                elif error_code == "7110":
+                    # OTP required - device not remembered
+                    logger.warning("OTP required (error 7110). Device not in 90-day trust window.")
+                    otp_state["rate_limited_until"] = 0
+                    otp_state["required"] = True
+                    otp_state["verified"] = False
+                    otp_state["error"] = "OTP required - call POST /otp/send to start authentication"
+                    logger.info("Use POST /otp/send to start manual MFA flow.")
+                    return True
+
+                else:
+                    # Unexpected error
+                    raise Exception(
+                        f"Unexpected login response: responseCode={response_code}, errorCode={error_code}, body={login_json}"
+                    )
 
             except Exception as auth_error:
                 logger.error(f"Authentication error: {auth_error}")
                 otp_state["error"] = str(auth_error)
                 otp_state["required"] = True
                 otp_state["verified"] = False
-
-                # Do NOT make diagnostic login attempts - they waste rate limit budget.
-                # The user should call /otp/send to start the manual Canada MFA flow.
                 logger.warning(
-                    "Auth failed (likely OTP required). "
-                    "Use POST /otp/send to start manual MFA flow. "
-                    "Do NOT call init_vehicle_manager again until OTP is verified."
+                    "Auth failed. Use POST /otp/send to start manual MFA flow if OTP is required."
                 )
-                # Return True to allow OTP endpoints to work (skip vehicle update)
                 return True
 
             logger.info("Updating vehicle states...")
