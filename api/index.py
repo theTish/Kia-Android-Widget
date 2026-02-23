@@ -635,11 +635,24 @@ def refresh_token_if_needed():
         logger.warning(f"Token refresh check failed: {e}")
 
 def require_auth(f):
-    """Decorator to require authorization header."""
+    """Decorator to require authorization header and verified OTP."""
     @wraps(f)
     def decorated(*args, **kwargs):
         if not init_vehicle_manager():
             return jsonify({"error": "Service initialization failed"}), 503
+
+        # Block vehicle actions if OTP is required but not yet verified
+        if otp_state.get("required") and not otp_state.get("verified"):
+            logger.warning(f"Request to {request.path} blocked: OTP not verified")
+            return jsonify({
+                "error": "OTP verification required before vehicle commands. Use POST /otp/send to start.",
+                "otp_required": True
+            }), 401
+
+        # Block if VEHICLE_ID was never set (auth failed, no vehicles loaded)
+        if VEHICLE_ID is None:
+            logger.warning(f"Request to {request.path} blocked: VEHICLE_ID is None")
+            return jsonify({"error": "Vehicle not initialized. Authentication may have failed."}), 503
 
         auth_header = request.headers.get("Authorization")
         if auth_header != SECRET_KEY:
