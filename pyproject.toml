@@ -3,10 +3,10 @@ name = "kia-android-widget"
 version = "0.1.0"
 description = "Kia Vehicle Control API"
 authors = [{name = "Your Name", email = "you@example.com"}]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "flask>=3.0.0",
-    "hyundai-kia-connect-api==4.5.0",
+    "hyundai-kia-connect-api==4.31.0",
     "requests>=2.31.0",
     "tzdata>=2023.3",
     "gunicorn>=21.2.0",

@@ -79,14 +79,32 @@ You can create an iOS Shortcut to interact with your Kia Vehicle Control API eas
 
 - `GET /` - Welcome message
 - `GET /health` - Health check endpoint (no auth required)
+- `GET /diagnostics` - Environment/config check (no auth required)
 - `GET /list_vehicles` - List all vehicles
-- `POST /status` - Get vehicle status (battery, charging, doors, etc.)
+- `POST /status` - Get vehicle status (battery, charging, doors, windows, location, warnings)
 - `GET /lock_status` - Get lock status
 - `POST /lock_car` - Lock the vehicle
 - `POST /unlock_car` - Unlock the vehicle
 - `POST /start_climate` - Start climate control
 - `POST /stop_climate` - Stop climate control
+- `POST /start_charge` - Start charging (must be plugged in)
+- `POST /stop_charge` - Stop charging
+- `POST /set_charge_limits` - Set AC/DC charge limits, e.g. `{"ac": 80, "dc": 80}`
 - `POST /debug_vehicle` - Debug endpoint for raw vehicle data
+
+### Authentication (2FA)
+
+Kia Canada requires OTP verification for unrecognised devices. These endpoints
+need no `Authorization` header:
+
+- `GET /otp/status` - Where the login currently stands
+- `POST /otp/send` - Email an OTP code, e.g. `{"method": "email"}`
+- `POST /otp/verify` - Submit the code, e.g. `{"otp": "123456"}`
+
+Once verified, Kia remembers the device for 90 days and restarts skip the OTP.
+If a login fails, the API backs off for 35 minutes before trying again —
+Kia's rate limiter (error 7901) resets its own timer on every attempt, so
+retrying sooner extends the lockout rather than clearing it.
 
 ## Features
 
