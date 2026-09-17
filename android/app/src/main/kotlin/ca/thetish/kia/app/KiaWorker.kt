@@ -1,6 +1,7 @@
 package ca.thetish.kia.app
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
@@ -12,6 +13,7 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import java.util.concurrent.TimeUnit
 import ca.thetish.kia.core.ApiResult
 import ca.thetish.kia.core.BuildConfig
 import ca.thetish.kia.core.KiaApi
@@ -40,13 +42,18 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
                 ACTION_LOCK -> KiaApi.lock()
                 ACTION_UNLOCK -> KiaApi.unlock()
                 ACTION_CLIMATE -> KiaApi.startClimate(BuildConfig.KIA_CLIMATE_PRESET)
-                ACTION_STATUS -> null
+                ACTION_STATUS, ACTION_DISARM -> null
                 else -> null
             }
         }
 
         if (action == ACTION_STATUS) {
             refresh(announce = true)
+            return Result.success()
+        }
+
+        if (action == ACTION_DISARM) {
+            disarm()
             return Result.success()
         }
 
@@ -61,6 +68,24 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
         if (result.ok) refresh(announce = false)
 
         return Result.success()
+    }
+
+    /**
+     * Drops the unlock arming once its window has passed.
+     *
+     * Without this the widget keeps showing an amber "Confirm" forever, because
+     * nothing redraws a widget on a timer. Tapping it after expiry only re-arms,
+     * so the danger is cosmetic, but a safety control whose label is stale is
+     * exactly the kind of thing that stops being trusted.
+     */
+    private suspend fun disarm() {
+        setState { prefs ->
+            val armedUntil = prefs[Keys.armedUntil] ?: 0L
+            // A newer tap may have re-armed since this was scheduled.
+            if (armedUntil != 0L && SystemClock.elapsedRealtime() >= armedUntil) {
+                prefs[Keys.armedUntil] = 0L
+            }
+        }
     }
 
     private suspend fun refresh(announce: Boolean) {
@@ -109,8 +134,10 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
         const val ACTION_UNLOCK = "unlock"
         const val ACTION_CLIMATE = "climate"
         const val ACTION_STATUS = "status"
+        const val ACTION_DISARM = "disarm"
 
         private const val WORK_NAME = "kia-widget-command"
+        private const val DISARM_WORK_NAME = "kia-widget-disarm"
 
         /**
          * Queues one command. REPLACE rather than KEEP so a tap always reflects
@@ -125,6 +152,22 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
 
             WorkManager.getInstance(context)
                 .enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
+        }
+
+        /**
+         * Schedules the arming to lapse visually when it lapses in fact.
+         *
+         * Its own unique name, so an unrelated tap in the meantime cannot
+         * replace it and strand the widget showing "Confirm".
+         */
+        fun enqueueDisarm(context: Context, delayMs: Long) {
+            val request = OneTimeWorkRequestBuilder<KiaWorker>()
+                .setInputData(workDataOf(KEY_ACTION to ACTION_DISARM))
+                .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
+                .build()
+
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork(DISARM_WORK_NAME, ExistingWorkPolicy.REPLACE, request)
         }
     }
 }

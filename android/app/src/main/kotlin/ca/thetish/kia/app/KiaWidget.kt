@@ -268,6 +268,8 @@ class UnlockAction : ActionCallback {
 
         if (armed) {
             KiaWidget().update(context, glanceId)
+            // Make the amber "Confirm" lapse on screen when the window lapses.
+            KiaWorker.enqueueDisarm(context, ARM_WINDOW_MS)
         } else {
             dispatch(context, glanceId, "Unlocking", KiaWorker.ACTION_UNLOCK)
         }
