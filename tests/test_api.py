@@ -31,9 +31,9 @@ def make_vehicle():
     v.engine_is_running = False
     v.front_left_door_is_open = 0
     v.front_left_window_is_open = 1
-    v.odometer = (18342.5, 1)
-    v.ev_driving_range = (310.0, 1)
-    v.total_driving_range = (310.0, 1)
+    v.odometer = (18342.5, "km")
+    v.ev_driving_range = (310.0, "km")
+    v.total_driving_range = (310.0, "km")
     v.air_temperature = (21.0, "C")
     v.tire_pressure_all_warning_is_on = 0
     v.washer_fluid_warning_is_on = 1
