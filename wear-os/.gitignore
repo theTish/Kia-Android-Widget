@@ -1,0 +1,15 @@
+# Never commit this file. It holds the API key.
+local.properties
+
+.gradle/
+build/
+*.apk
+*.aab
+
+# Seeded design canvas: a 2.4 MB editor payload, rebuilt from the
+# design/*.dc.html sources whenever it is needed.
+design/kia-ev6-watch-tile.html
+*.iml
+.idea/
+.cxx/
+captures/

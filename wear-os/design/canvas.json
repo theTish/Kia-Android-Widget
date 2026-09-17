@@ -1,0 +1,47 @@
+{
+  "artboards": [
+    { "file": "OptionA.dc.html", "x": 0, "y": 0, "w": 450, "h": 450, "title": "Option A — as built (three pills)" },
+    { "file": "Main.dc.html", "x": 610, "y": 0, "w": 450, "h": 450, "title": "Option B — two-up + pill  (CHOSEN)" },
+    { "file": "ConfirmB.dc.html", "x": 1220, "y": 0, "w": 450, "h": 450, "title": "Option B — unlock armed" },
+    { "file": "OptionC.dc.html", "x": 0, "y": 780, "w": 450, "h": 450, "title": "Option C — radial" },
+    { "file": "OptionD.dc.html", "x": 610, "y": 780, "w": 450, "h": 450, "title": "Option D — one primary, two secondary" }
+  ],
+  "annotations": [
+    {
+      "id": "note-a",
+      "x": 0,
+      "y": -330,
+      "w": 450,
+      "text": "What shipped first. Corrected after measuring it properly.\n\nIt is tight, not broken. On a 44mm watch the worst point clears the glass by about 11dp. On a 40mm watch only the bottom pill's rounded corners overhang, by roughly 2dp — the flat bottom edge stays inside.\n\nThe real problems are elsewhere: 42dp targets, under the 48dp minimum, and a 150dp-wide button that wastes the widest part of a round screen on empty pill."
+    },
+    {
+      "id": "note-b",
+      "x": 610,
+      "y": -330,
+      "w": 450,
+      "text": "Chosen, and now drawn 1:1 against the shipped code.\n\nLock and Unlock are 62dp circles at the fattest part of the face. Climate is a 130x44dp pill below. Stack is 144dp tall and centre-aligned, so it adapts to both watch sizes instead of relying on fixed top padding.\n\nTradeoff: Climate's target is shallower than the circles, and the icons have to carry meaning at a glance."
+    },
+    {
+      "id": "note-b-armed",
+      "x": 1220,
+      "y": -330,
+      "w": 450,
+      "text": "The armed state, ten seconds after the first Unlock tap.\n\nLock and Climate recede so there is exactly one live target. Amber plus a ring, not amber alone, so it still reads in sunlight and for colour-blind eyes."
+    },
+    {
+      "id": "note-c",
+      "x": 0,
+      "y": 1270,
+      "w": 450,
+      "text": "Three equal targets on one orbit, status in the middle.\n\nEvery button clears both bezels comfortably and the centre leaves room for vehicle state later, battery percentage for instance.\n\nTradeoff: three equal weights means no muscle memory. You read the tile every time instead of hitting Lock blind."
+    },
+    {
+      "id": "note-d",
+      "x": 610,
+      "y": 1270,
+      "w": 450,
+      "text": "Weighted for the action you actually repeat.\n\nLock is an 85dp target you can hit without looking. Unlock and Climate are 48dp and lower down, which is honest about how often they get used.\n\nTradeoff: Unlock being the small one fights the two-tap confirm, which wants a comfortable target twice."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}
