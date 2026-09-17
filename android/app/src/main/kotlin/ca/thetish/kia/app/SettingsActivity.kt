@@ -54,9 +54,11 @@ class SettingsActivity : Activity() {
         )
         baseUrl.setOnClickListener { baseUrl.showDropDown() }
 
-        preset.adapter = ArrayAdapter(
-            this, android.R.layout.simple_spinner_dropdown_item, KiaSettings.PRESETS
-        )
+        // Own layouts for both states: the platform ones take their colour from
+        // the theme and rendered invisible on this black background.
+        preset.adapter = ArrayAdapter(this, R.layout.spinner_item, KiaSettings.PRESETS).apply {
+            setDropDownViewResource(R.layout.spinner_item)
+        }
 
         val current = KiaSettings.load(this)
         baseUrl.setText(current.baseUrl)
@@ -101,9 +103,13 @@ class SettingsActivity : Activity() {
             main.post {
                 if (isDestroyed) return@post
                 val status = outcome.status
+                val battery = status?.batteryPercent
                 result.text = when {
-                    outcome.ok && status != null ->
-                        getString(R.string.test_ok, status.batteryPercent ?: 0)
+                    // Never invent a number: the car sometimes answers without
+                    // any EV data at all, and "battery 0%" would read as a flat
+                    // battery rather than as "not reported".
+                    outcome.ok && battery != null -> getString(R.string.test_ok, battery)
+                    outcome.ok -> getString(R.string.test_ok_no_data)
                     else -> getString(R.string.test_failed, outcome.message)
                 }
             }

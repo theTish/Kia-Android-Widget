@@ -690,6 +690,20 @@ def vehicle_status():
     """Get current vehicle status."""
 
     refresh_token_if_needed()
+
+    # Kia serves a cached view of the car, and that cache sometimes comes back
+    # with no EV data at all - no battery, no range - while still reporting the
+    # 12V. Rendering that as 0% would read as a flat battery rather than "not
+    # reported", so allow a direct poll of the car instead.
+    #
+    # Not the default: a force refresh wakes the car's modem and costs a little
+    # 12V, which is why the cheap cached read is still what normal calls use.
+    force = bool((request.get_json(silent=True) or {}).get("force"))
+    if force:
+        logger.info("Forcing a live refresh from the car...")
+        vehicle_manager.force_refresh_vehicle_state(VEHICLE_ID)
+        vehicle_state_cache["last_update"] = None
+
     vehicle = get_cached_vehicle_state()
 
     pct = vehicle.ev_battery_percentage
