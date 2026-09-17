@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kia Tile</string>
+    <string name="tile_label">EV6</string>
+    <string name="tile_description">Lock, unlock and start climate on the EV6.</string>
+</resources>

@@ -37,3 +37,9 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+
+# Tasker config exports. Every HTTP Request action in these carries the API
+# key in a plain Authorization header, so they are credential files.
+backup.xml
+backup_*.xml
+*.tsk.xml

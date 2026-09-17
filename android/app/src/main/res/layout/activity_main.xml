@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="32dp"
+        android:gravity="center"
+        android:text="@string/ready"
+        android:textColor="@color/text_dim"
+        android:textSize="18sp" />
+
+    <Button
+        android:id="@+id/lock"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:layout_marginBottom="16dp"
+        android:backgroundTint="@color/lock"
+        android:drawableStart="@drawable/ic_lock"
+        android:drawablePadding="12dp"
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp"
+        android:text="@string/lock"
+        android:textColor="@color/text"
+        android:textSize="18sp" />
+
+    <Button
+        android:id="@+id/unlock"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:layout_marginBottom="16dp"
+        android:backgroundTint="@color/unlock"
+        android:drawableStart="@drawable/ic_unlock"
+        android:drawablePadding="12dp"
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp"
+        android:text="@string/unlock"
+        android:textColor="@color/text"
+        android:textSize="18sp" />
+
+    <Button
+        android:id="@+id/climate"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:backgroundTint="@color/climate"
+        android:drawableStart="@drawable/ic_climate"
+        android:drawablePadding="12dp"
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp"
+        android:text="@string/climate"
+        android:textColor="@color/text"
+        android:textSize="18sp" />
+
+</LinearLayout>

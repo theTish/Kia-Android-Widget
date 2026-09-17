@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    updatePeriodMillis is 0 deliberately. The system's periodic update only
+    re-renders the widget; it does not run our network call, so a schedule here
+    would wake the device without refreshing anything. Status is fetched when
+    Refresh is tapped and after any command succeeds.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
+    android:previewImage="@drawable/ic_kia"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />
