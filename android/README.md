@@ -9,7 +9,7 @@ watch and phone talk to Vercel directly rather than relaying through Tasker.
 |---------|------------|---------|
 | `:core` | The API client and the build-time secrets. Everything else depends on it. | `ca.thetish.kia.core` |
 | `:tile` | Wear OS tile: Lock, Unlock, Climate. | `ca.thetish.kiatile` |
-| `:app`  | Phone app, and in time the home screen widget. | `ca.thetish.kia.app` |
+| `:app`  | Phone app and the home screen widget. | `ca.thetish.kia.app` |
 
 `:core` owns the networking, so it declares `INTERNET` and
 `ACCESS_NETWORK_STATE` and those merge into both consumers. It is also the only
@@ -78,6 +78,31 @@ The tile has no launcher icon on purpose. It is a tile and nothing else.
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+Then long-press the home screen, choose **Widgets**, and drag **Kia EV6** out.
+It is resizable; the default is four cells by two.
+
+## The widget
+
+Built with Glance, so the layout is Compose rather than `RemoteViews` by hand.
+It shows battery, range and lock state, with Lock, Unlock, Climate and Refresh.
+An unlocked car is coloured amber, because that is the one state worth noticing
+from across the room.
+
+Two things about it are deliberate and easy to undo by accident:
+
+**Taps run in a `CoroutineWorker`, not in the Glance `ActionCallback`.** Glance
+dispatches actions through a `BroadcastReceiver`, and the system stops giving a
+receiver CPU after about ten seconds. A cold car regularly takes longer than
+that to answer, so the call would be killed part-way with the widget still
+showing `Locking…` and no way to tell whether the car heard it. `KiaWorker`
+survives that window.
+
+**`updatePeriodMillis` is 0.** The system's periodic update only re-renders the
+widget, it does not run the network call, so a schedule there would wake the
+device without refreshing anything. Status is fetched when Refresh is tapped and
+after any command succeeds. If you want it to update on its own, that wants a
+periodic `WorkManager` job, not `updatePeriodMillis`.
 
 ## Behaviour
 

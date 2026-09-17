@@ -9,4 +9,6 @@
     <string name="climate">Climate</string>
     <string name="working">%1$s…</string>
     <string name="no_key">No API key in this build. See local.properties.example.</string>
+    <string name="widget_label">Kia EV6</string>
+    <string name="widget_description">Lock, unlock and start climate on the EV6.</string>
 </resources>
