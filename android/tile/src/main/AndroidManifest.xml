@@ -3,8 +3,8 @@
 
     <uses-feature android:name="android.hardware.type.watch" />
 
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- INTERNET and ACCESS_NETWORK_STATE come from :core, which owns the
+         networking, and merge in from its manifest. -->
 
     <application
         android:allowBackup="false"

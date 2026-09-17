@@ -1,4 +1,4 @@
-package ca.thetish.kiatile
+package ca.thetish.kia.core
 
 import java.io.BufferedReader
 import java.net.HttpURLConnection
