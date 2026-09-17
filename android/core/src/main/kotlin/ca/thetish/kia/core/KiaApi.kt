@@ -48,9 +48,29 @@ object KiaApi {
     fun startClimate(cfg: KiaConfig): ApiResult =
         command(cfg, "/start_climate", JSONObject().put("preset", cfg.climatePreset).toString())
 
-    /** Reads /status and parses the bits the clients show. */
+    /**
+     * Reads /status.
+     *
+     * Kia's cached view of the car sometimes answers with no EV data at all -
+     * no battery, no range - while still reporting the 12V. When that happens
+     * this retries once asking the API to poll the car directly, because a
+     * status screen with no battery on it is useless.
+     *
+     * Only on the empty case: a forced poll wakes the car's modem, so it is not
+     * something to do on every refresh.
+     */
     fun status(cfg: KiaConfig): StatusResult {
-        val (code, text, error) = request(cfg, "/status", null)
+        val first = statusOnce(cfg, force = false)
+        if (first.ok && first.status?.batteryPercent == null) {
+            val forced = statusOnce(cfg, force = true)
+            if (forced.ok) return forced
+        }
+        return first
+    }
+
+    private fun statusOnce(cfg: KiaConfig, force: Boolean): StatusResult {
+        val body = if (force) JSONObject().put("force", true).toString() else null
+        val (code, text, error) = request(cfg, "/status", body)
 
         if (error != null) return StatusResult(false, error, null)
         if (!code.isOk) return StatusResult(false, field(text, "error") ?: "HTTP $code", null)
