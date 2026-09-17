@@ -14,7 +14,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import java.util.concurrent.TimeUnit
 import ca.thetish.kia.core.ApiResult
-import ca.thetish.kia.core.BuildConfig
+import ca.thetish.kia.core.KiaSettings
 import ca.thetish.kia.core.KiaApi
 import ca.thetish.kia.core.VehicleStatus
 import kotlinx.coroutines.Dispatchers
@@ -42,11 +42,15 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
             ACTION_STATUS -> { refresh(announce = true); return Result.success() }
         }
 
+        // Read once per run, so changing Settings takes effect on the next tap
+        // without needing the widget rebuilt or the process restarted.
+        val cfg = KiaSettings.load(applicationContext)
+
         val result = withContext(Dispatchers.IO) {
             when (action) {
-                ACTION_LOCK -> KiaApi.lock()
-                ACTION_UNLOCK -> KiaApi.unlock()
-                ACTION_CLIMATE -> KiaApi.startClimate(BuildConfig.KIA_CLIMATE_PRESET)
+                ACTION_LOCK -> KiaApi.lock(cfg)
+                ACTION_UNLOCK -> KiaApi.unlock(cfg)
+                ACTION_CLIMATE -> KiaApi.startClimate(cfg)
                 else -> null
             }
         } ?: return Result.failure()
@@ -86,7 +90,7 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
     }
 
     private suspend fun refresh(announce: Boolean) {
-        val result = withContext(Dispatchers.IO) { KiaApi.status() }
+        val result = withContext(Dispatchers.IO) { KiaApi.status(KiaSettings.load(applicationContext)) }
         val status = result.status
 
         setState { prefs ->

@@ -1,6 +1,7 @@
 package ca.thetish.kia.app
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -8,7 +9,7 @@ import android.os.SystemClock
 import android.widget.Button
 import android.widget.TextView
 import ca.thetish.kia.core.ApiResult
-import ca.thetish.kia.core.BuildConfig
+import ca.thetish.kia.core.KiaSettings
 import ca.thetish.kia.core.KiaApi
 import ca.thetish.kia.core.UnlockGuard
 import java.util.concurrent.Executors
@@ -29,6 +30,7 @@ class MainActivity : Activity() {
     private lateinit var lockButton: Button
     private lateinit var unlockButton: Button
     private lateinit var climateButton: Button
+    private lateinit var settingsButton: Button
 
     /** See UnlockGuard: first tap arms, second tap sends. */
     private var unlockArmedUntil = 0L
@@ -41,11 +43,12 @@ class MainActivity : Activity() {
         lockButton = findViewById(R.id.lock)
         unlockButton = findViewById(R.id.unlock)
         climateButton = findViewById(R.id.climate)
+        settingsButton = findViewById(R.id.settings)
 
-        lockButton.setOnClickListener { send("Locking") { KiaApi.lock() } }
+        lockButton.setOnClickListener { send("Locking") { KiaApi.lock(KiaSettings.load(this)) } }
 
         climateButton.setOnClickListener {
-            send("Starting climate") { KiaApi.startClimate(BuildConfig.KIA_CLIMATE_PRESET) }
+            send("Starting climate") { KiaApi.startClimate(KiaSettings.load(this)) }
         }
 
         unlockButton.setOnClickListener {
@@ -53,7 +56,7 @@ class MainActivity : Activity() {
             if (UnlockGuard.shouldFire(now, unlockArmedUntil)) {
                 unlockArmedUntil = 0L
                 unlockButton.text = getString(R.string.unlock)
-                send("Unlocking") { KiaApi.unlock() }
+                send("Unlocking") { KiaApi.unlock(KiaSettings.load(this)) }
             } else {
                 unlockArmedUntil = UnlockGuard.armUntil(now)
                 unlockButton.text = getString(R.string.unlock_confirm)
@@ -67,9 +70,8 @@ class MainActivity : Activity() {
             }
         }
 
-        if (BuildConfig.KIA_SECRET.isEmpty()) {
-            status.text = getString(R.string.no_key)
-            setButtonsEnabled(false)
+        settingsButton.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
         }
     }
 
@@ -92,6 +94,17 @@ class MainActivity : Activity() {
         lockButton.isEnabled = enabled
         unlockButton.isEnabled = enabled
         climateButton.isEnabled = enabled
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Settings may have changed while we were away.
+        if (!KiaSettings.isConfigured(this)) {
+            status.text = getString(R.string.no_key)
+            setButtonsEnabled(false)
+        } else {
+            setButtonsEnabled(true)
+        }
     }
 
     override fun onDestroy() {

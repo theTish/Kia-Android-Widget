@@ -23,6 +23,11 @@
 
         </activity>
 
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="@string/settings_title" />
+
         <receiver
             android:name=".KiaWidgetReceiver"
             android:exported="true"

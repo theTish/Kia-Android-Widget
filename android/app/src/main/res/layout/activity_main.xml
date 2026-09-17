@@ -58,4 +58,14 @@
         android:textColor="@color/text"
         android:textSize="18sp" />
 
+    <Button
+        android:id="@+id/settings"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="32dp"
+        android:backgroundTint="@color/background"
+        android:text="@string/settings"
+        android:textColor="@color/text_dim"
+        android:textSize="16sp" />
+
 </LinearLayout>

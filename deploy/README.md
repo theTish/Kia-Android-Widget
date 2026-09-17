@@ -42,6 +42,27 @@ deploy itself, because `git pull` updates the checkout and not `/home/opc/bin`:
 scp -i "C:/Users/leeti/benchbot.key" deploy/kia-deploy.sh opc@100.78.17.30:/home/opc/bin/kia-deploy.sh
 ```
 
+## Changing a value in kia.env
+
+Re-run the deploy script. **`docker restart` will not do it** — a container's
+environment is fixed when it is created, so a restart silently keeps the old
+values and the app fails with whatever the stale credential was. That cost a
+wrong-password diagnosis and an avoidable failed login against Kia on
+2026-09-17.
+
+```bash
+ssh -i "C:/Users/leeti/benchbot.key" opc@100.78.17.30 "/home/opc/bin/kia-deploy.sh"
+```
+
+To confirm what the running container actually has, without printing secrets:
+
+```bash
+docker exec kia-api python -c "
+import os, hashlib
+v = os.environ['KIA_PASSWORD']
+print(len(v), hashlib.sha256(v.encode()).hexdigest()[:8])"
+```
+
 ## Environment
 
 `/home/opc/kia.env` holds the same variables Vercel had, plus one:

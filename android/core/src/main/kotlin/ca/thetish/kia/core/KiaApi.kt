@@ -41,16 +41,16 @@ object KiaApi {
 
     private val Int.isOk get() = this in 200..299
 
-    fun lock(): ApiResult = command("/lock_car", null)
+    fun lock(cfg: KiaConfig): ApiResult = command(cfg, "/lock_car", null)
 
-    fun unlock(): ApiResult = command("/unlock_car", null)
+    fun unlock(cfg: KiaConfig): ApiResult = command(cfg, "/unlock_car", null)
 
-    fun startClimate(preset: String): ApiResult =
-        command("/start_climate", JSONObject().put("preset", preset).toString())
+    fun startClimate(cfg: KiaConfig): ApiResult =
+        command(cfg, "/start_climate", JSONObject().put("preset", cfg.climatePreset).toString())
 
     /** Reads /status and parses the bits the clients show. */
-    fun status(): StatusResult {
-        val (code, text, error) = request("/status", null)
+    fun status(cfg: KiaConfig): StatusResult {
+        val (code, text, error) = request(cfg, "/status", null)
 
         if (error != null) return StatusResult(false, error, null)
         if (!code.isOk) return StatusResult(false, field(text, "error") ?: "HTTP $code", null)
@@ -72,8 +72,8 @@ object KiaApi {
         }
     }
 
-    private fun command(path: String, body: String?): ApiResult {
-        val (code, text, error) = request(path, body)
+    private fun command(cfg: KiaConfig, path: String, body: String?): ApiResult {
+        val (code, text, error) = request(cfg, path, body)
 
         if (error != null) return ApiResult(false, error)
 
@@ -86,19 +86,19 @@ object KiaApi {
     }
 
     /** One POST. Returns status code and body, or a human-readable failure. */
-    private fun request(path: String, body: String?): Triple<Int, String, String?> {
-        if (BuildConfig.KIA_SECRET.isEmpty()) {
-            return Triple(0, "", "No key in build")
+    private fun request(cfg: KiaConfig, path: String, body: String?): Triple<Int, String, String?> {
+        if (!cfg.isUsable) {
+            return Triple(0, "", "No API key set")
         }
 
         return try {
-            val conn = (URL(BuildConfig.KIA_BASE_URL + path).openConnection() as HttpURLConnection)
+            val conn = (URL(cfg.baseUrl + path).openConnection() as HttpURLConnection)
                 .apply {
                     requestMethod = "POST"
                     connectTimeout = TIMEOUT_MS
                     readTimeout = TIMEOUT_MS
                     doOutput = true
-                    setRequestProperty("Authorization", BuildConfig.KIA_SECRET)
+                    setRequestProperty("Authorization", cfg.secret)
                     setRequestProperty("Accept", "application/json")
                     setRequestProperty("Content-Type", "application/json")
                 }
