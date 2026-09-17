@@ -27,4 +27,16 @@
     <string name="save">Save</string>
     <string name="settings_saved">Saved</string>
     <string name="settings_footnote">The watch tile is a separate install on a separate device, so it keeps whatever was compiled into it and is not affected by these settings.</string>
+    <string name="section_attention">Needs attention</string>
+    <string name="section_charge">Charge</string>
+    <string name="section_climate">Climate</string>
+    <string name="section_car">Car</string>
+    <string name="show_on_map">Show on map</string>
+    <string name="refresh">Refresh</string>
+    <string name="loading">Loading…</string>
+    <string name="locked_state">Locked</string>
+    <string name="unlocked_state">UNLOCKED</string>
+    <string name="lock_unknown">Lock state unknown</string>
+    <string name="updated_at">Updated %1$s</string>
+    <string name="no_map_app">No map app installed.</string>
 </resources>

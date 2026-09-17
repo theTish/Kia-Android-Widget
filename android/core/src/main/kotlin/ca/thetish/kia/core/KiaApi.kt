@@ -8,23 +8,6 @@ import java.net.URL
 /** Outcome of one command, already reduced to something short enough for a watch face. */
 data class ApiResult(val ok: Boolean, val message: String)
 
-/**
- * The slice of /status the clients actually render.
- *
- * Deliberately narrow: /status returns a great deal more (windows, warnings,
- * service intervals, climate readback), and this grows when something needs it
- * rather than carrying fields nothing reads.
- *
- * Every field is nullable because the car reports what it feels like reporting:
- * a value missing from the response is normal, not an error.
- */
-data class VehicleStatus(
-    val batteryPercent: Int?,
-    val isCharging: Boolean,
-    val isLocked: Boolean?,
-    val range: Int?,
-)
-
 /** A status read: the parsed state, or why it could not be read. */
 data class StatusResult(val ok: Boolean, val message: String, val status: VehicleStatus?)
 
@@ -76,17 +59,7 @@ object KiaApi {
         if (!code.isOk) return StatusResult(false, field(text, "error") ?: "HTTP $code", null)
 
         return try {
-            val json = JSONObject(text)
-            StatusResult(
-                ok = true,
-                message = "Updated",
-                status = VehicleStatus(
-                    batteryPercent = json.intOrNull("battery_percentage"),
-                    isCharging = json.optBoolean("is_charging", false),
-                    isLocked = json.boolOrNull("is_locked"),
-                    range = json.optJSONObject("range")?.intOrNull("ev"),
-                ),
-            )
+            StatusResult(ok = true, message = "Updated", status = VehicleStatus.parse(JSONObject(text)))
         } catch (e: Exception) {
             StatusResult(false, e.message?.takeIf { it.isNotBlank() } ?: "Bad response", null)
         }
@@ -142,14 +115,6 @@ object KiaApi {
     /** Pulls one string field out of a reply, for the command messages. */
     private fun field(json: String, key: String): String? =
         runCatching { JSONObject(json).stringOrNull(key) }.getOrNull()
-
-    // JSON null and absent both mean "unknown", so both come back as null here
-    // rather than as optInt's 0 or optBoolean's false.
-    private fun JSONObject.intOrNull(key: String): Int? =
-        if (isNull(key)) null else optInt(key)
-
-    private fun JSONObject.boolOrNull(key: String): Boolean? =
-        if (isNull(key)) null else optBoolean(key)
 
     private fun JSONObject.stringOrNull(key: String): String? =
         if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
