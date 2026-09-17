@@ -10,6 +10,7 @@ import android.widget.TextView
 import ca.thetish.kia.core.ApiResult
 import ca.thetish.kia.core.BuildConfig
 import ca.thetish.kia.core.KiaApi
+import ca.thetish.kia.core.UnlockGuard
 import java.util.concurrent.Executors
 
 /**
@@ -29,11 +30,7 @@ class MainActivity : Activity() {
     private lateinit var unlockButton: Button
     private lateinit var climateButton: Button
 
-    /**
-     * Unlock is two taps. The first arms it, the second sends it. Leaving a car
-     * unlocked by accident is worse than an extra tap, and the same guard is in
-     * the watch tile.
-     */
+    /** See UnlockGuard: first tap arms, second tap sends. */
     private var unlockArmedUntil = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,12 +50,12 @@ class MainActivity : Activity() {
 
         unlockButton.setOnClickListener {
             val now = SystemClock.elapsedRealtime()
-            if (now < unlockArmedUntil) {
+            if (UnlockGuard.shouldFire(now, unlockArmedUntil)) {
                 unlockArmedUntil = 0L
                 unlockButton.text = getString(R.string.unlock)
                 send("Unlocking") { KiaApi.unlock() }
             } else {
-                unlockArmedUntil = now + ARM_WINDOW_MS
+                unlockArmedUntil = UnlockGuard.armUntil(now)
                 unlockButton.text = getString(R.string.unlock_confirm)
                 status.text = getString(R.string.unlock_prompt)
                 main.postDelayed({
@@ -66,7 +63,7 @@ class MainActivity : Activity() {
                         unlockArmedUntil = 0L
                         unlockButton.text = getString(R.string.unlock)
                     }
-                }, ARM_WINDOW_MS)
+                }, UnlockGuard.ARM_WINDOW_MS)
             }
         }
 
@@ -83,6 +80,8 @@ class MainActivity : Activity() {
         io.execute {
             val result = call()
             main.post {
+                // The call can outlive the Activity by up to the request timeout.
+                if (isDestroyed) return@post
                 status.text = result.message
                 setButtonsEnabled(true)
             }
@@ -97,10 +96,10 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        io.shutdown()
+        // shutdownNow interrupts a request still in flight; plain shutdown would
+        // let it hold this Activity and its view tree for the full 45s timeout.
+        io.shutdownNow()
+        main.removeCallbacksAndMessages(null)
     }
 
-    private companion object {
-        const val ARM_WINDOW_MS = 10_000L
-    }
 }

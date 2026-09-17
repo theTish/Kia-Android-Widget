@@ -9,7 +9,6 @@ import androidx.glance.appwidget.updateAll
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -36,28 +35,21 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
     override suspend fun doWork(): Result {
         val action = inputData.getString(KEY_ACTION) ?: return Result.failure()
 
-        // Network on IO, never on whatever thread the worker happens to start on.
-        val outcome: ApiResult? = withContext(Dispatchers.IO) {
+        // The two bookkeeping actions make no network call, so they return
+        // before any IO hop; refresh() does its own.
+        when (action) {
+            ACTION_DISARM -> { disarm(); return Result.success() }
+            ACTION_STATUS -> { refresh(announce = true); return Result.success() }
+        }
+
+        val result = withContext(Dispatchers.IO) {
             when (action) {
                 ACTION_LOCK -> KiaApi.lock()
                 ACTION_UNLOCK -> KiaApi.unlock()
                 ACTION_CLIMATE -> KiaApi.startClimate(BuildConfig.KIA_CLIMATE_PRESET)
-                ACTION_STATUS, ACTION_DISARM -> null
                 else -> null
             }
-        }
-
-        if (action == ACTION_STATUS) {
-            refresh(announce = true)
-            return Result.success()
-        }
-
-        if (action == ACTION_DISARM) {
-            disarm()
-            return Result.success()
-        }
-
-        val result = outcome ?: return Result.failure()
+        } ?: return Result.failure()
 
         setState { prefs ->
             prefs[Keys.busy] = false
@@ -79,13 +71,18 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
      * exactly the kind of thing that stops being trusted.
      */
     private suspend fun disarm() {
-        setState { prefs ->
+        var cleared = false
+        setState(redraw = false) { prefs ->
             val armedUntil = prefs[Keys.armedUntil] ?: 0L
             // A newer tap may have re-armed since this was scheduled.
             if (armedUntil != 0L && SystemClock.elapsedRealtime() >= armedUntil) {
                 prefs[Keys.armedUntil] = 0L
+                cleared = true
             }
         }
+        // Only push RemoteViews if something actually changed - otherwise this
+        // is a wakeup and a full redraw of every instance for no visible effect.
+        if (cleared) KiaWidget().updateAll(applicationContext)
     }
 
     private suspend fun refresh(announce: Boolean) {
@@ -109,12 +106,12 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
      * All instances share one car, so they all show the same thing. That also
      * sidesteps passing a GlanceId through WorkManager, which cannot carry one.
      */
-    private suspend fun setState(edit: (MutablePreferences) -> Unit) {
+    private suspend fun setState(redraw: Boolean = true, edit: (MutablePreferences) -> Unit) {
         val manager = GlanceAppWidgetManager(applicationContext)
         for (id in manager.getGlanceIds(KiaWidget::class.java)) {
             updateAppWidgetState(applicationContext, id, edit)
         }
-        KiaWidget().updateAll(applicationContext)
+        if (redraw) KiaWidget().updateAll(applicationContext)
     }
 
     private fun MutablePreferences.store(status: VehicleStatus) {
@@ -122,10 +119,10 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
         status.range?.let { this[Keys.range] = it }
         this[Keys.charging] = status.isCharging
 
-        // Two keys, because "unknown" and "unlocked" must not render the same.
+        // Removing the key is how "unknown" is stored: an absent preference
+        // reads back as null, which must not render as "unlocked".
         val locked = status.isLocked
-        this[Keys.lockedKnown] = locked != null
-        if (locked != null) this[Keys.locked] = locked
+        if (locked == null) remove(Keys.locked) else this[Keys.locked] = locked
     }
 
     companion object {
@@ -136,22 +133,25 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
         const val ACTION_STATUS = "status"
         const val ACTION_DISARM = "disarm"
 
-        private const val WORK_NAME = "kia-widget-command"
         private const val DISARM_WORK_NAME = "kia-widget-disarm"
 
         /**
-         * Queues one command. REPLACE rather than KEEP so a tap always reflects
-         * what the user just asked for instead of being silently dropped behind
-         * an in-flight request.
+         * Queues one action.
+         *
+         * Each action gets its own queue name. Sharing one name meant a later
+         * tap REPLACEd - that is, cancelled - a command already talking to the
+         * car: tap Unlock then Refresh and the unlock coroutine dies part-way,
+         * so the widget never learns what happened and may paint a stale lock
+         * state over a car that did unlock. Only a repeat of the SAME action
+         * replaces its predecessor, which is what you want for a double tap.
          */
         fun enqueue(context: Context, action: String) {
             val request = OneTimeWorkRequestBuilder<KiaWorker>()
                 .setInputData(workDataOf(KEY_ACTION to action))
-                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .build()
 
             WorkManager.getInstance(context)
-                .enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
+                .enqueueUniqueWork("kia-widget-$action", ExistingWorkPolicy.REPLACE, request)
         }
 
         /**
@@ -168,6 +168,11 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
 
             WorkManager.getInstance(context)
                 .enqueueUniqueWork(DISARM_WORK_NAME, ExistingWorkPolicy.REPLACE, request)
+        }
+
+        /** Drops a scheduled disarm once something else has cleared the arming. */
+        fun cancelDisarm(context: Context) {
+            WorkManager.getInstance(context).cancelUniqueWork(DISARM_WORK_NAME)
         }
     }
 }

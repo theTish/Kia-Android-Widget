@@ -50,6 +50,24 @@ def _trimmed_env(name: str):
     return trimmed or None
 
 
+def _bool(value):
+    """Coerce the API's mixed 0/1/'0'/True door and window flags.
+
+    Note this is deliberately not the library's utils.bool_or_none: that one
+    does bool(value), so the string "0" would come back True.
+    """
+    if value is None:
+        return None
+    try:
+        return bool(int(value))
+    except (ValueError, TypeError):
+        return bool(value)
+
+
+def _int(value):
+    return int(value) if value is not None else None
+
+
 # ── Environment Variables ──
 USERNAME = _trimmed_env('KIA_USERNAME')
 PASSWORD = _trimmed_env('KIA_PASSWORD')
@@ -77,10 +95,8 @@ if PIN:
 # ── Global state ──
 vehicle_manager = None
 VEHICLE_ID = None
-vehicle_state_cache = {
-    "last_update": None,
-    "data": None
-}
+# Only a timestamp: the state itself lives on the VehicleManager's vehicles.
+vehicle_state_cache = {"last_update": None}
 rate_limit_store = {}
 
 # ── OTP/2FA Support ──
@@ -91,7 +107,6 @@ otp_state = {
     "sent": False,
     "verified": False,
     "error": None,
-    "otp_request": None,  # OTPRequest returned by login() when MFA is needed
     "rate_limited_until": 0,  # Timestamp: don't attempt login until this time
 }
 
@@ -112,7 +127,10 @@ import uuid as _uuid
 import base64 as _base64
 
 _STABLE_DEVICE_ID_BASE = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.102 Mobile Safari/537.36"
-_device_seed = os.environ.get("KIA_EMAIL", "") or os.environ.get("KIA_USERNAME", "") or "default"
+# Through _trimmed_env like every other credential: a stray newline pasted into
+# the Vercel dashboard would change this hash, change the device ID, and cost a
+# fresh OTP. Never edit _STABLE_DEVICE_ID_BASE either - it only has to be stable.
+_device_seed = _trimmed_env("KIA_EMAIL") or USERNAME or "default"
 _STABLE_DEVICE_UUID = str(_uuid.UUID(_hashlib.md5(_device_seed.encode()).hexdigest()))
 _STABLE_DEVICE_ID = _base64.b64encode(
     f"{_STABLE_DEVICE_ID_BASE}+{_STABLE_DEVICE_UUID}".encode()
@@ -132,6 +150,14 @@ def _build_vehicle_manager():
     )
     # Override the library's MAC-derived device ID (see note above). The API
     # object reads this attribute for the Deviceid header on every MFA call.
+    # Assert first: if a library bump renames it this would silently create an
+    # unused attribute, fall back to the MAC-derived ID and cost an OTP plus a
+    # rate-limit lockout, with nothing in the logs pointing at the cause.
+    if not hasattr(vm.api, "_device_id"):
+        raise RuntimeError(
+            "hyundai_kia_connect_api moved _device_id - re-check the device-ID seam "
+            "before deploying, or every cold start will trigger a fresh OTP."
+        )
     vm.api._device_id = _STABLE_DEVICE_ID
     return vm
 
@@ -168,7 +194,6 @@ def _complete_login(vm) -> bool:
             "sent": False,
             "verified": True,
             "error": None,
-            "otp_request": None,
             "rate_limited_until": 0,
         }
     )
@@ -186,12 +211,10 @@ def _complete_login(vm) -> bool:
         VEHICLE_ID = env_vehicle_id or next(iter(vm.vehicles.keys()))
         logger.info(f"VEHICLE_ID set to: {VEHICLE_ID}")
 
-    try:
-        vm.update_all_vehicles_with_cached_state()
-    except Exception as update_error:
-        # Non-fatal: the vehicle list is loaded, state will refresh on next read.
-        logger.error(f"Initial state update failed: {update_error}", exc_info=True)
-
+    # Deliberately no state read here. login() has already fetched the vehicle
+    # list, which is all a command endpoint needs, and get_cached_vehicle_state
+    # will fetch state on demand for the ones that read it. Reading it here made
+    # every cold start pay for two vendor round trips instead of one.
     return True
 
 
@@ -199,14 +222,10 @@ def init_vehicle_manager():
     """Initialize vehicle manager lazily on first request."""
     global vehicle_manager, VEHICLE_ID
 
-    # If already initialized, return success
-    if vehicle_manager is not None and VEHICLE_ID is not None:
+    # VEHICLE_ID is only ever set alongside a live manager, and it is the thing
+    # every caller actually needs, so it alone decides whether we are ready.
+    if VEHICLE_ID is not None:
         return True
-
-    # If vehicle_manager exists but VEHICLE_ID is None, force re-initialization
-    if vehicle_manager is not None and VEHICLE_ID is None:
-        logger.warning("Vehicle manager exists but VEHICLE_ID is None. Forcing re-initialization...")
-        vehicle_manager = None
 
     # Check credentials first
     if USERNAME is None or PASSWORD is None or PIN is None:
@@ -252,8 +271,9 @@ def init_vehicle_manager():
 
     if isinstance(result, OTPRequest):
         # Device is outside the 90-day trust window - user must verify by email.
+        # VehicleManager.login() has already stored the challenge on itself;
+        # we only record that one is outstanding.
         logger.warning("OTP required (device not recognised). Use POST /otp/send.")
-        otp_state["otp_request"] = result
         otp_state["required"] = True
         otp_state["verified"] = False
         otp_state["sent"] = False
@@ -332,18 +352,51 @@ def refresh_token_if_needed():
     except AuthenticationOTPRequired:
         # Canada has no refresh endpoint, so a refresh is a fresh login. If the
         # device trust has lapsed that login comes back asking for an OTP.
+        #
+        # check_and_refresh_token raises without setting vehicle_manager.otp_request,
+        # so there is no challenge to hand to /otp/send yet. Flag it and let
+        # /otp/send drive a fresh login, which does set one.
         logger.warning("Token refresh needs a new OTP. Use POST /otp/send.")
         otp_state["required"] = True
         otp_state["verified"] = False
-        otp_state["otp_request"] = getattr(vehicle_manager, "otp_request", None)
         otp_state["error"] = "OTP required - call POST /otp/send to re-authenticate"
     except Exception as e:
         logger.warning(f"Token refresh check failed: {e}")
+
+def json_errors(f):
+    """Turn an unhandled exception into a 500 JSON body, logged with a traceback.
+
+    Every endpoint had its own copy of this try/except; /status had a third
+    spelling of it using traceback.print_exc().
+    """
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error in {request.path}: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+    return wrapped
+
 
 def require_auth(f):
     """Decorator to require authorization header and verified OTP."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Check the key and the rate limit BEFORE init_vehicle_manager, because
+        # initialising performs a real login against Kia. Doing it the other way
+        # let any unauthenticated request burn a login - and repeated ones feed
+        # the 7901 lockout the cooldown below exists to avoid.
+        auth_header = request.headers.get("Authorization")
+        if auth_header != SECRET_KEY:
+            logger.warning(f"Unauthorized request to {request.path} from {request.remote_addr}")
+            return jsonify({"error": "Unauthorized"}), 403
+
+        client_id = request.remote_addr
+        if not check_rate_limit(client_id):
+            logger.warning(f"Rate limit exceeded for {client_id}")
+            return jsonify({"error": "Rate limit exceeded. Please try again later."}), 429
+
         if not init_vehicle_manager():
             return jsonify({"error": "Service initialization failed"}), 503
 
@@ -359,17 +412,6 @@ def require_auth(f):
         if VEHICLE_ID is None:
             logger.warning(f"Request to {request.path} blocked: VEHICLE_ID is None")
             return jsonify({"error": "Vehicle not initialized. Authentication may have failed."}), 503
-
-        auth_header = request.headers.get("Authorization")
-        if auth_header != SECRET_KEY:
-            logger.warning(f"Unauthorized request to {request.path} from {request.remote_addr}")
-            return jsonify({"error": "Unauthorized"}), 403
-
-        # Rate limiting
-        client_id = request.remote_addr
-        if not check_rate_limit(client_id):
-            logger.warning(f"Rate limit exceeded for {client_id}")
-            return jsonify({"error": "Rate limit exceeded. Please try again later."}), 429
 
         return f(*args, **kwargs)
     return decorated
@@ -413,7 +455,6 @@ def root():
 @app.route('/diagnostics', methods=['GET'])
 def diagnostics():
     """Diagnostic endpoint to check environment configuration (no auth required)."""
-    region_names = {1: "Europe", 2: "Canada", 3: "USA", 4: "China", 5: "Australia"}
 
     # Check credential format issues
     credential_warnings = []
@@ -442,7 +483,7 @@ def diagnostics():
         },
         "configuration": {
             "region_code": REGION,
-            "region_name": region_names.get(REGION, "Unknown"),
+            "region_name": REGION_CODES.get(REGION, "Unknown"),
             "battery_capacity_kwh": BATTERY_CAPACITY_KWH,
             "brand": BRAND_KIA
         },
@@ -489,11 +530,30 @@ def send_otp():
             "message": "Device is already trusted - no OTP needed. API is ready to use.",
         }), 200
 
-    if otp_state.get("otp_request") is None:
-        return jsonify({
-            "error": "No OTP challenge available. Login did not request one.",
-            "detail": otp_state.get("error"),
-        }), 503
+    # The library owns the challenge (vehicle_manager.otp_request); we do not
+    # keep a copy. A lapse detected during a token refresh raises without
+    # setting one, so log in again here to produce it.
+    if getattr(vehicle_manager, "otp_request", None) is None:
+        try:
+            logger.info("No OTP challenge held; logging in to request one...")
+            vehicle_manager.login()
+        except Exception as e:
+            logger.error(f"Login while requesting an OTP challenge failed: {e}", exc_info=True)
+            otp_state["error"] = str(e)
+            _start_cooldown("Login while requesting an OTP challenge failed.")
+            return jsonify({"error": str(e), "type": type(e).__name__}), 503
+
+        if getattr(vehicle_manager, "otp_request", None) is None:
+            # login() returned a Token, so the device is trusted after all.
+            if _complete_login(vehicle_manager):
+                return jsonify({
+                    "status": "authenticated",
+                    "message": "Device is already trusted - no OTP needed. API is ready to use.",
+                }), 200
+            return jsonify({
+                "error": "No OTP challenge available. Login did not request one.",
+                "detail": otp_state.get("error"),
+            }), 503
 
     try:
         logger.info(f"Requesting OTP via {method}...")
@@ -531,7 +591,7 @@ def verify_otp():
     if not otp.isdigit():
         return jsonify({"error": "OTP must be numeric"}), 400
 
-    if vehicle_manager is None or otp_state.get("otp_request") is None:
+    if vehicle_manager is None or getattr(vehicle_manager, "otp_request", None) is None:
         return jsonify({"error": "No OTP context available. Call /otp/send first."}), 400
 
     try:
@@ -572,257 +632,225 @@ def otp_status():
 # ── List Vehicles Endpoint ──
 @app.route('/list_vehicles', methods=['GET'])
 @require_auth
+@json_errors
 def list_vehicles():
     """List all vehicles in the account."""
-    logger.info("Received request to /list_vehicles")
 
-    try:
-        refresh_token_if_needed()
-        vehicle_manager.update_all_vehicles_with_cached_state()
+    refresh_token_if_needed()
+    # No state refresh: login() already populated the vehicle list, and this
+    # endpoint only reads its metadata.
+    vehicles = vehicle_manager.vehicles
 
-        vehicles = vehicle_manager.vehicles
+    if not vehicles:
+        logger.warning("No vehicles found in the account")
+        return jsonify({"error": "No vehicles found"}), 404
 
-        if not vehicles:
-            logger.warning("No vehicles found in the account")
-            return jsonify({"error": "No vehicles found"}), 404
+    vehicle_list = [
+        {
+            "name": v.name,
+            "id": v.id,
+            "model": v.model,
+            "year": v.year
+        }
+        for v in vehicles.values()
+    ]
 
-        vehicle_list = [
-            {
-                "name": v.name,
-                "id": v.id,
-                "model": v.model,
-                "year": v.year
-            }
-            for v in vehicles.values()
-        ]
+    if not vehicle_list:
+        logger.warning("No valid vehicles found in the account")
+        return jsonify({"error": "No valid vehicles found"}), 404
 
-        if not vehicle_list:
-            logger.warning("No valid vehicles found in the account")
-            return jsonify({"error": "No valid vehicles found"}), 404
-
-        logger.info(f"Returning vehicle list: {vehicle_list}")
-        return jsonify({"status": "Success", "vehicles": vehicle_list}), 200
-    except Exception as e:
-        logger.error(f"Error in /list_vehicles: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    logger.info(f"Returning vehicle list: {vehicle_list}")
+    return jsonify({"status": "Success", "vehicles": vehicle_list}), 200
 
 # ── Vehicle Status Endpoint ──
 @app.route('/status', methods=['POST'])
 @require_auth
+@json_errors
 def vehicle_status():
     """Get current vehicle status."""
-    logger.info("Received request to /status")
 
+    refresh_token_if_needed()
+    vehicle = get_cached_vehicle_state()
+
+    pct = vehicle.ev_battery_percentage
+    dur = vehicle.ev_estimated_current_charge_duration
+    charging = bool(vehicle.ev_battery_is_charging)
+
+    # ── Plug type detection ──
+    # 0 = not plugged, 1 = DC (fast), 2 = AC (Level 2/portable)
+    plug_type_raw = vehicle.ev_battery_is_plugged_in
     try:
-        refresh_token_if_needed()
-        vehicle = get_cached_vehicle_state()
+        plug_type_int = int(plug_type_raw) if plug_type_raw is not None else 0
+    except (ValueError, TypeError):
+        plug_type_int = 0
 
-        pct = vehicle.ev_battery_percentage
-        dur = vehicle.ev_estimated_current_charge_duration
-        charging = bool(vehicle.ev_battery_is_charging)
+    plugged_in = plug_type_int > 0
+    plug_type_map = {0: None, 1: "DC", 2: "AC"}
+    plug_type = plug_type_map.get(plug_type_int, None)
 
-        # ── Plug type detection ──
-        # 0 = not plugged, 1 = DC (fast), 2 = AC (Level 2/portable)
-        plug_type_raw = vehicle.ev_battery_is_plugged_in
-        try:
-            plug_type_int = int(plug_type_raw) if plug_type_raw is not None else 0
-        except (ValueError, TypeError):
-            plug_type_int = 0
+    # ── Charge limits ──
+    charge_limit_ac = vehicle.ev_charge_limits_ac
+    charge_limit_dc = vehicle.ev_charge_limits_dc
 
-        plugged_in = plug_type_int > 0
-        plug_type_map = {0: None, 1: "DC", 2: "AC"}
-        plug_type = plug_type_map.get(plug_type_int, None)
+    # Active limit based on plug type
+    if plug_type_int == 1:  # DC
+        active_charge_limit = charge_limit_dc
+    elif plug_type_int == 2:  # AC
+        active_charge_limit = charge_limit_ac
+    else:  # Not plugged in - show AC limit as default
+        active_charge_limit = charge_limit_ac
 
-        # ── Charge limits ──
-        charge_limit_ac = vehicle.ev_charge_limits_ac
-        charge_limit_dc = vehicle.ev_charge_limits_dc
+    # ── Estimate charging power ──
+    # NOTE: the Canada API does not report instantaneous current/voltage
+    # (KiaUvoApiCA never populates ev_charging_current or _voltage), so this
+    # estimate derived from the remaining time is the only figure available.
+    estimated_kw = None
+    if charging and dur and dur > 0 and pct is not None and active_charge_limit:
+        if pct < active_charge_limit:
+            fraction = (active_charge_limit - pct) / 100
+            estimated_kw = round((BATTERY_CAPACITY_KWH * fraction) / (dur / 60), 1)
 
-        # Active limit based on plug type
-        if plug_type_int == 1:  # DC
-            active_charge_limit = charge_limit_dc
-        elif plug_type_int == 2:  # AC
-            active_charge_limit = charge_limit_ac
-        else:  # Not plugged in - show AC limit as default
-            active_charge_limit = charge_limit_ac
+    # ── ETA Calculation ──
+    eta_time = eta_duration = None
+    if charging and dur and dur > 0:
+        now = datetime.now(ZoneInfo("America/Toronto"))
+        eta_dt = now + timedelta(minutes=dur)
+        # %-I is a glibc extension and raises on Windows, so strip the
+        # leading zero ourselves to keep this runnable off Linux.
+        eta_time = eta_dt.strftime("%I:%M %p").lstrip("0")
+        h, m = divmod(dur, 60)
+        eta_duration = f"{h}h {m}m remaining"
 
-        # ── Estimate charging power ──
-        # NOTE: the Canada API does not report instantaneous current/voltage
-        # (KiaUvoApiCA never populates ev_charging_current or _voltage), so this
-        # estimate derived from the remaining time is the only figure available.
-        estimated_kw = None
-        if charging and dur and dur > 0 and pct is not None and active_charge_limit:
-            if pct < active_charge_limit:
-                fraction = (active_charge_limit - pct) / 100
-                estimated_kw = round((BATTERY_CAPACITY_KWH * fraction) / (dur / 60), 1)
+    # ── Response ──
+    resp = {
+        "battery_percentage": _int(pct),
+        "battery_12v": _int(vehicle.car_battery_percentage),
+        "charge_duration": int(dur) if dur is not None else 0,
+        "charging_eta": eta_time,
+        "charging_duration_formatted": eta_duration,
+        "estimated_charging_power_kw": estimated_kw,
+        "is_charging": charging,
+        "plugged_in": plugged_in,
+        "plug_type": plug_type,  # "DC", "AC", or null
+        "charge_limits": {
+            "ac": charge_limit_ac,
+            "dc": charge_limit_dc,
+            "active": active_charge_limit,  # The limit that applies based on plug type
+        },
+        "charge_duration_estimates": {
+            "fast": _int(vehicle.ev_estimated_fast_charge_duration),
+            "portable": _int(vehicle.ev_estimated_portable_charge_duration),
+            "station": _int(vehicle.ev_estimated_station_charge_duration),
+        },
+        "battery_preconditioning": _bool(vehicle.ev_battery_precondition_enabled),
+        # The library has already mapped the raw unit code to a string
+        # ("km"/"mi") when it set these, so they are passed through as-is.
+        "range": {
+            "ev": vehicle.ev_driving_range,
+            "total": vehicle.total_driving_range,
+            "unit": vehicle.ev_driving_range_unit,
+        },
+        "odometer": {
+            "value": vehicle.odometer,
+            "unit": vehicle.odometer_unit,
+        },
+        "is_locked": _bool(vehicle.is_locked),
+        "engine_running": _bool(vehicle.engine_is_running),
+        "doors": {
+            "front_left": _bool(vehicle.front_left_door_is_open),
+            "front_right": _bool(vehicle.front_right_door_is_open),
+            "back_left": _bool(vehicle.back_left_door_is_open),
+            "back_right": _bool(vehicle.back_right_door_is_open),
+            "trunk": _bool(vehicle.trunk_is_open),
+            "hood": _bool(vehicle.hood_is_open),
+        },
+        "windows": {
+            "front_left": _bool(vehicle.front_left_window_is_open),
+            "front_right": _bool(vehicle.front_right_window_is_open),
+            "back_left": _bool(vehicle.back_left_window_is_open),
+            "back_right": _bool(vehicle.back_right_window_is_open),
+            "sunroof": _bool(vehicle.sunroof_is_open),
+        },
+        "climate": {
+            "air_control_on": _bool(vehicle.air_control_is_on),
+            "set_temperature": vehicle.air_temperature,
+            "defrost_on": _bool(vehicle.defrost_is_on),
+            "steering_wheel_heater_on": _bool(vehicle.steering_wheel_heater_is_on),
+            "side_mirror_heater_on": _bool(vehicle.side_mirror_heater_is_on),
+            "rear_window_heater_on": _bool(vehicle.back_window_heater_is_on),
+        },
+        "warnings": {
+            "tire_pressure_any": _bool(vehicle.tire_pressure_all_warning_is_on),
+            "tire_pressure_front_left": _bool(vehicle.tire_pressure_front_left_warning_is_on),
+            "tire_pressure_front_right": _bool(vehicle.tire_pressure_front_right_warning_is_on),
+            "tire_pressure_rear_left": _bool(vehicle.tire_pressure_rear_left_warning_is_on),
+            "tire_pressure_rear_right": _bool(vehicle.tire_pressure_rear_right_warning_is_on),
+            "washer_fluid_low": _bool(vehicle.washer_fluid_warning_is_on),
+            "brake_fluid_low": _bool(vehicle.brake_fluid_warning_is_on),
+        },
+        "service": {
+            "distance_since_last": vehicle.last_service_distance,
+            "distance_to_next": vehicle.next_service_distance,
+        },
+        "location": {
+            "latitude": vehicle.location_latitude,
+            "longitude": vehicle.location_longitude,
+            "last_updated": vehicle.location_last_updated_at.isoformat()
+            if vehicle.location_last_updated_at else None,
+        },
+        "last_updated_at": vehicle.last_updated_at.isoformat()
+        if vehicle.last_updated_at else None,
+    }
 
-        # ── ETA Calculation ──
-        eta_time = eta_duration = None
-        if charging and dur and dur > 0:
-            now = datetime.now(ZoneInfo("America/Toronto"))
-            eta_dt = now + timedelta(minutes=dur)
-            # %-I is a glibc extension and raises on Windows, so strip the
-            # leading zero ourselves to keep this runnable off Linux.
-            eta_time = eta_dt.strftime("%I:%M %p").lstrip("0")
-            h, m = divmod(dur, 60)
-            eta_duration = f"{h}h {m}m remaining"
+    return jsonify(resp), 200
 
-        def _bool(value):
-            """Coerce the API's mixed 0/1/'0'/True door and window flags."""
-            if value is None:
-                return None
-            try:
-                return bool(int(value))
-            except (ValueError, TypeError):
-                return bool(value)
-
-        def _int(value):
-            return int(value) if value is not None else None
-
-        # ── Response ──
-        resp = {
-            "battery_percentage": _int(pct),
-            "battery_12v": _int(vehicle.car_battery_percentage),
-            "charge_duration": int(dur) if dur is not None else 0,
-            "charging_eta": eta_time,
-            "charging_duration_formatted": eta_duration,
-            "estimated_charging_power_kw": estimated_kw,
-            "is_charging": charging,
-            "plugged_in": plugged_in,
-            "plug_type": plug_type,  # "DC", "AC", or null
-            "charge_limits": {
-                "ac": charge_limit_ac,
-                "dc": charge_limit_dc,
-                "active": active_charge_limit,  # The limit that applies based on plug type
-            },
-            "charge_duration_estimates": {
-                "fast": _int(vehicle.ev_estimated_fast_charge_duration),
-                "portable": _int(vehicle.ev_estimated_portable_charge_duration),
-                "station": _int(vehicle.ev_estimated_station_charge_duration),
-            },
-            "battery_preconditioning": _bool(vehicle.ev_battery_precondition_enabled),
-            # The library has already mapped the raw unit code to a string
-            # ("km"/"mi") when it set these, so they are passed through as-is.
-            "range": {
-                "ev": vehicle.ev_driving_range,
-                "total": vehicle.total_driving_range,
-                "unit": vehicle.ev_driving_range_unit,
-            },
-            "odometer": {
-                "value": vehicle.odometer,
-                "unit": vehicle.odometer_unit,
-            },
-            "is_locked": _bool(vehicle.is_locked),
-            "engine_running": _bool(vehicle.engine_is_running),
-            "doors": {
-                "front_left": _bool(vehicle.front_left_door_is_open),
-                "front_right": _bool(vehicle.front_right_door_is_open),
-                "back_left": _bool(vehicle.back_left_door_is_open),
-                "back_right": _bool(vehicle.back_right_door_is_open),
-                "trunk": _bool(vehicle.trunk_is_open),
-                "hood": _bool(vehicle.hood_is_open),
-            },
-            "windows": {
-                "front_left": _bool(vehicle.front_left_window_is_open),
-                "front_right": _bool(vehicle.front_right_window_is_open),
-                "back_left": _bool(vehicle.back_left_window_is_open),
-                "back_right": _bool(vehicle.back_right_window_is_open),
-                "sunroof": _bool(vehicle.sunroof_is_open),
-            },
-            "climate": {
-                "air_control_on": _bool(vehicle.air_control_is_on),
-                "set_temperature": vehicle.air_temperature,
-                "defrost_on": _bool(vehicle.defrost_is_on),
-                "steering_wheel_heater_on": _bool(vehicle.steering_wheel_heater_is_on),
-                "side_mirror_heater_on": _bool(vehicle.side_mirror_heater_is_on),
-                "rear_window_heater_on": _bool(vehicle.back_window_heater_is_on),
-            },
-            "warnings": {
-                "tire_pressure_any": _bool(vehicle.tire_pressure_all_warning_is_on),
-                "tire_pressure_front_left": _bool(vehicle.tire_pressure_front_left_warning_is_on),
-                "tire_pressure_front_right": _bool(vehicle.tire_pressure_front_right_warning_is_on),
-                "tire_pressure_rear_left": _bool(vehicle.tire_pressure_rear_left_warning_is_on),
-                "tire_pressure_rear_right": _bool(vehicle.tire_pressure_rear_right_warning_is_on),
-                "washer_fluid_low": _bool(vehicle.washer_fluid_warning_is_on),
-                "brake_fluid_low": _bool(vehicle.brake_fluid_warning_is_on),
-            },
-            "service": {
-                "distance_since_last": vehicle.last_service_distance,
-                "distance_to_next": vehicle.next_service_distance,
-            },
-            "location": {
-                "latitude": vehicle.location_latitude,
-                "longitude": vehicle.location_longitude,
-                "last_updated": vehicle._location_last_set_time.isoformat()
-                if getattr(vehicle, "_location_last_set_time", None) else None,
-            },
-            "last_updated_at": vehicle.last_updated_at.isoformat()
-            if vehicle.last_updated_at else None,
-        }
-
-        return jsonify(resp), 200
-
-    except Exception as e:
-        import traceback
-        logger.error(f"Error in /status: {e}")
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
 
 # ── Lock Status Endpoint ──
 @app.route('/lock_status', methods=['GET'])
 @require_auth
+@json_errors
 def lock_status():
     """Get vehicle lock status."""
-    logger.info("Received request to /lock_status")
 
-    try:
-        refresh_token_if_needed()
-        vehicle = get_cached_vehicle_state()
-        is_locked = vehicle.is_locked
+    refresh_token_if_needed()
+    vehicle = get_cached_vehicle_state()
+    # Same coercion as /status: the library passes doorLock through raw, so
+    # without this the two endpoints can disagree about the type.
+    is_locked = _bool(vehicle.is_locked)
 
-        logger.info(f"Lock status: {'Locked' if is_locked else 'Unlocked'}")
-        return jsonify({"is_locked": is_locked}), 200
+    logger.info(f"Lock status: {'Locked' if is_locked else 'Unlocked'}")
+    return jsonify({"is_locked": is_locked}), 200
 
-    except Exception as e:
-        logger.error(f"Error in /lock_status: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
 
 # ── Unlock Car Endpoint ──
 @app.route('/unlock_car', methods=['POST'])
 @require_auth
+@json_errors
 def unlock_car():
     """Unlock the vehicle."""
-    logger.info("Received request to /unlock_car")
 
-    try:
-        refresh_token_if_needed()
-        vehicle_manager.update_all_vehicles_with_cached_state()
+    refresh_token_if_needed()
+    # No state refresh: this command does not read vehicle state, and the
+    # caller usually asks for /status straight afterwards anyway.
+    result = vehicle_manager.unlock(VEHICLE_ID)
+    logger.info(f"Unlock result: {result}")
 
-        result = vehicle_manager.unlock(VEHICLE_ID)
-        logger.info(f"Unlock result: {result}")
-
-        return jsonify({"status": "Car unlocked", "result": result}), 200
-    except Exception as e:
-        logger.error(f"Error in /unlock_car: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "Car unlocked", "result": result}), 200
 
 # ── Lock Car Endpoint ──
 @app.route('/lock_car', methods=['POST'])
 @require_auth
+@json_errors
 def lock_car():
     """Lock the vehicle."""
-    logger.info("Received request to /lock_car")
 
-    try:
-        refresh_token_if_needed()
-        vehicle_manager.update_all_vehicles_with_cached_state()
+    refresh_token_if_needed()
+    # No state refresh: this command does not read vehicle state, and the
+    # caller usually asks for /status straight afterwards anyway.
+    result = vehicle_manager.lock(VEHICLE_ID)
+    logger.info(f"Lock result: {result}")
 
-        result = vehicle_manager.lock(VEHICLE_ID)
-        logger.info(f"Lock result: {result}")
-
-        return jsonify({"status": "Car locked", "result": result}), 200
-    except Exception as e:
-        logger.error(f"Error in /lock_car: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "Car locked", "result": result}), 200
 
 # ── Climate Presets ──
 CLIMATE_PRESETS = {
@@ -955,173 +983,159 @@ def _start_climate_custom(vehicle_manager, vehicle_id, options):
 # ── Start Climate Endpoint ──
 @app.route('/start_climate', methods=['POST'])
 @require_auth
+@json_errors
 def start_climate():
     """Start climate control with optional seasonal presets."""
-    logger.info("Received request to /start_climate")
+
+    from hyundai_kia_connect_api import ClimateRequestOptions
+
+    refresh_token_if_needed()
+    # Reads state below, so go through the cache rather than always refetching.
+    get_cached_vehicle_state()
+
+    data = request.get_json() or {}
+    logger.info(f"Incoming payload: {data}")
+
+    # ── Check for preset ──
+    preset = data.get("preset", "").lower()
+    if preset:
+        if preset not in CLIMATE_PRESETS:
+            return jsonify({
+                "error": f"Invalid preset '{preset}'. Valid options: {list(CLIMATE_PRESETS.keys())}"
+            }), 400
+        # Use preset values, but allow overrides from request
+        preset_values = CLIMATE_PRESETS[preset].copy()
+        logger.info(f"Using preset '{preset}': {preset_values}")
+        # Merge with any explicit overrides from request (except 'preset' itself)
+        for key in preset_values:
+            if key in data:
+                preset_values[key] = data[key]
+        data = preset_values
+
+    # ── Input Validation ──
+    try:
+        set_temp = float(data.get("set_temp", 21))
+        if not 16 <= set_temp <= 30:
+            return jsonify({"error": "Temperature must be between 16-30°C"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid temperature value"}), 400
 
     try:
-        from hyundai_kia_connect_api import ClimateRequestOptions
+        duration = int(data.get("duration", 10))
+        if not 5 <= duration <= 30:
+            return jsonify({"error": "Duration must be between 5-30 minutes"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid duration value"}), 400
 
-        refresh_token_if_needed()
-        vehicle_manager.update_all_vehicles_with_cached_state()
-
-        data = request.get_json() or {}
-        logger.info(f"Incoming payload: {data}")
-
-        # ── Check for preset ──
-        preset = data.get("preset", "").lower()
-        if preset:
-            if preset not in CLIMATE_PRESETS:
-                return jsonify({
-                    "error": f"Invalid preset '{preset}'. Valid options: {list(CLIMATE_PRESETS.keys())}"
-                }), 400
-            # Use preset values, but allow overrides from request
-            preset_values = CLIMATE_PRESETS[preset].copy()
-            logger.info(f"Using preset '{preset}': {preset_values}")
-            # Merge with any explicit overrides from request (except 'preset' itself)
-            for key in preset_values:
-                if key in data:
-                    preset_values[key] = data[key]
-            data = preset_values
-
-        # ── Input Validation ──
+    # Validate seat heating levels (0-3)
+    for seat in ["front_left_seat", "front_right_seat", "rear_left_seat", "rear_right_seat"]:
         try:
-            set_temp = float(data.get("set_temp", 21))
-            if not 16 <= set_temp <= 30:
-                return jsonify({"error": "Temperature must be between 16-30°C"}), 400
+            level = int(data.get(seat, 0))
+            if not 0 <= level <= 3:
+                return jsonify({"error": f"{seat} must be between 0-3"}), 400
         except (ValueError, TypeError):
-            return jsonify({"error": "Invalid temperature value"}), 400
+            return jsonify({"error": f"Invalid {seat} value"}), 400
 
+    # Validate steering wheel heating (0-3)
+    try:
+        steering = int(data.get("steering_wheel", 0))
+        if not 0 <= steering <= 3:
+            return jsonify({"error": "steering_wheel must be between 0-3"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid steering_wheel value"}), 400
+
+    # Create ClimateRequestOptions object
+    climate_options = ClimateRequestOptions(
+        climate=bool(data.get("climate", True)),
+        set_temp=set_temp,
+        defrost=bool(data.get("defrost", False)),
+        heating=int(data.get("heating", 1)),
+        duration=duration,
+        front_left_seat=int(data.get("front_left_seat", 0)),
+        front_right_seat=int(data.get("front_right_seat", 0)),
+        rear_left_seat=int(data.get("rear_left_seat", 0)),
+        rear_right_seat=int(data.get("rear_right_seat", 0)),
+        steering_wheel=steering
+    )
+
+    # Try custom implementation first (includes heatingAccessory for steering wheel)
+    use_custom = data.get("use_custom", True)  # Default to custom implementation
+    result = None
+
+    if use_custom:
         try:
-            duration = int(data.get("duration", 10))
-            if not 5 <= duration <= 30:
-                return jsonify({"error": "Duration must be between 5-30 minutes"}), 400
-        except (ValueError, TypeError):
-            return jsonify({"error": "Invalid duration value"}), 400
+            logger.info("Attempting custom climate start with heatingAccessory...")
+            result = _start_climate_custom(vehicle_manager, VEHICLE_ID, climate_options)
+            logger.info(f"Custom climate start succeeded: {result}")
+        except Exception as custom_err:
+            logger.warning(f"Custom climate start failed: {custom_err}, falling back to library method")
+            result = None
 
-        # Validate seat heating levels (0-3)
-        for seat in ["front_left_seat", "front_right_seat", "rear_left_seat", "rear_right_seat"]:
-            try:
-                level = int(data.get(seat, 0))
-                if not 0 <= level <= 3:
-                    return jsonify({"error": f"{seat} must be between 0-3"}), 400
-            except (ValueError, TypeError):
-                return jsonify({"error": f"Invalid {seat} value"}), 400
+    # Fall back to library method if custom failed or not requested
+    if result is None:
+        logger.info("Using library's start_climate method...")
+        result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
+        logger.info(f"Library start_climate result: {result}")
 
-        # Validate steering wheel heating (0-3)
-        try:
-            steering = int(data.get("steering_wheel", 0))
-            if not 0 <= steering <= 3:
-                return jsonify({"error": "steering_wheel must be between 0-3"}), 400
-        except (ValueError, TypeError):
-            return jsonify({"error": "Invalid steering_wheel value"}), 400
-
-        # Create ClimateRequestOptions object
-        climate_options = ClimateRequestOptions(
-            climate=bool(data.get("climate", True)),
-            set_temp=set_temp,
-            defrost=bool(data.get("defrost", False)),
-            heating=int(data.get("heating", 1)),
-            duration=duration,
-            front_left_seat=int(data.get("front_left_seat", 0)),
-            front_right_seat=int(data.get("front_right_seat", 0)),
-            rear_left_seat=int(data.get("rear_left_seat", 0)),
-            rear_right_seat=int(data.get("rear_right_seat", 0)),
-            steering_wheel=steering
-        )
-
-        # Try custom implementation first (includes heatingAccessory for steering wheel)
-        use_custom = data.get("use_custom", True)  # Default to custom implementation
-        result = None
-
-        if use_custom:
-            try:
-                logger.info("Attempting custom climate start with heatingAccessory...")
-                result = _start_climate_custom(vehicle_manager, VEHICLE_ID, climate_options)
-                logger.info(f"Custom climate start succeeded: {result}")
-            except Exception as custom_err:
-                logger.warning(f"Custom climate start failed: {custom_err}, falling back to library method")
-                result = None
-
-        # Fall back to library method if custom failed or not requested
-        if result is None:
-            logger.info("Using library's start_climate method...")
-            result = vehicle_manager.start_climate(VEHICLE_ID, climate_options)
-            logger.info(f"Library start_climate result: {result}")
-
-        return jsonify({
-            "status": "Climate started",
-            "preset": preset if preset else None,
-            "settings": {
-                "temperature": set_temp,
-                "defrost": bool(data.get("defrost", False)),
-                "steering_wheel": steering,
-                "front_left_seat": int(data.get("front_left_seat", 0)),
-                "front_right_seat": int(data.get("front_right_seat", 0)),
-            },
-            "result": result
-        }), 200
-    except Exception as e:
-        logger.error(f"Error in /start_climate: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "status": "Climate started",
+        "preset": preset if preset else None,
+        "settings": {
+            "temperature": set_temp,
+            "defrost": bool(data.get("defrost", False)),
+            "steering_wheel": steering,
+            "front_left_seat": int(data.get("front_left_seat", 0)),
+            "front_right_seat": int(data.get("front_right_seat", 0)),
+        },
+        "result": result
+    }), 200
 
 # ── Stop Climate Endpoint ──
 @app.route('/stop_climate', methods=['POST'])
 @require_auth
+@json_errors
 def stop_climate():
     """Stop climate control."""
-    logger.info("Received request to /stop_climate")
 
-    try:
-        refresh_token_if_needed()
-        vehicle_manager.update_all_vehicles_with_cached_state()
+    refresh_token_if_needed()
+    # No state refresh: this command does not read vehicle state, and the
+    # caller usually asks for /status straight afterwards anyway.
+    result = vehicle_manager.stop_climate(VEHICLE_ID)
+    logger.info(f"Stop climate result: {result}")
 
-        result = vehicle_manager.stop_climate(VEHICLE_ID)
-        logger.info(f"Stop climate result: {result}")
-
-        return jsonify({"status": "Climate stopped", "result": result}), 200
-    except Exception as e:
-        logger.error(f"Error in /stop_climate: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "Climate stopped", "result": result}), 200
 
 
 # ── Charge Control Endpoints ──
 @app.route('/start_charge', methods=['POST'])
 @require_auth
+@json_errors
 def start_charge():
     """Start charging. Only works while the car is plugged in."""
-    logger.info("Received request to /start_charge")
 
-    try:
-        refresh_token_if_needed()
-        result = vehicle_manager.start_charge(VEHICLE_ID)
-        logger.info(f"Start charge result: {result}")
+    refresh_token_if_needed()
+    result = vehicle_manager.start_charge(VEHICLE_ID)
+    logger.info(f"Start charge result: {result}")
 
-        return jsonify({"status": "Charging started", "result": result}), 200
-    except Exception as e:
-        logger.error(f"Error in /start_charge: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "Charging started", "result": result}), 200
 
 
 @app.route('/stop_charge', methods=['POST'])
 @require_auth
+@json_errors
 def stop_charge():
     """Stop charging."""
-    logger.info("Received request to /stop_charge")
 
-    try:
-        refresh_token_if_needed()
-        result = vehicle_manager.stop_charge(VEHICLE_ID)
-        logger.info(f"Stop charge result: {result}")
+    refresh_token_if_needed()
+    result = vehicle_manager.stop_charge(VEHICLE_ID)
+    logger.info(f"Stop charge result: {result}")
 
-        return jsonify({"status": "Charging stopped", "result": result}), 200
-    except Exception as e:
-        logger.error(f"Error in /stop_charge: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "Charging stopped", "result": result}), 200
 
 
 @app.route('/set_charge_limits', methods=['POST'])
 @require_auth
+@json_errors
 def set_charge_limits():
     """
     Set the AC and DC charge limits.
@@ -1130,71 +1144,61 @@ def set_charge_limits():
     Either key may be omitted; the current limit is kept for whichever is left out.
     Kia accepts limits in 10% steps between 50 and 100.
     """
-    logger.info("Received request to /set_charge_limits")
 
     data = request.get_json() or {}
 
+    refresh_token_if_needed()
+    vehicle = get_cached_vehicle_state()
+
+    ac = data.get("ac", vehicle.ev_charge_limits_ac)
+    dc = data.get("dc", vehicle.ev_charge_limits_dc)
+
+    if ac is None or dc is None:
+        return jsonify({
+            "error": "Both 'ac' and 'dc' limits are required - the current "
+                     "values could not be read from the vehicle."
+        }), 400
+
     try:
-        refresh_token_if_needed()
-        vehicle = get_cached_vehicle_state()
+        ac, dc = int(ac), int(dc)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Charge limits must be whole numbers"}), 400
 
-        ac = data.get("ac", vehicle.ev_charge_limits_ac)
-        dc = data.get("dc", vehicle.ev_charge_limits_dc)
-
-        if ac is None or dc is None:
+    for name, value in (("ac", ac), ("dc", dc)):
+        if not 50 <= value <= 100 or value % 10 != 0:
             return jsonify({
-                "error": "Both 'ac' and 'dc' limits are required - the current "
-                         "values could not be read from the vehicle."
+                "error": f"Invalid {name} limit {value}. Must be 50-100 in steps of 10."
             }), 400
 
-        try:
-            ac, dc = int(ac), int(dc)
-        except (ValueError, TypeError):
-            return jsonify({"error": "Charge limits must be whole numbers"}), 400
+    result = vehicle_manager.set_charge_limits(VEHICLE_ID, ac, dc)
+    logger.info(f"Set charge limits result: {result}")
 
-        for name, value in (("ac", ac), ("dc", dc)):
-            if not 50 <= value <= 100 or value % 10 != 0:
-                return jsonify({
-                    "error": f"Invalid {name} limit {value}. Must be 50-100 in steps of 10."
-                }), 400
-
-        result = vehicle_manager.set_charge_limits(VEHICLE_ID, ac, dc)
-        logger.info(f"Set charge limits result: {result}")
-
-        return jsonify({
-            "status": "Charge limits set",
-            "limits": {"ac": ac, "dc": dc},
-            "result": result,
-        }), 200
-    except Exception as e:
-        logger.error(f"Error in /set_charge_limits: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "status": "Charge limits set",
+        "limits": {"ac": ac, "dc": dc},
+        "result": result,
+    }), 200
 # ── Debug Vehicle Endpoint ──
 @app.route('/debug_vehicle', methods=['POST'])
 @require_auth
+@json_errors
 def debug_vehicle():
     """Debug endpoint to view raw vehicle data."""
-    logger.info("Received request to /debug_vehicle")
 
-    try:
-        refresh_token_if_needed()
-        vehicle_manager.update_all_vehicles_with_cached_state()
-        vehicle = vehicle_manager.get_vehicle(VEHICLE_ID)
+    refresh_token_if_needed()
+    vehicle = get_cached_vehicle_state()
 
-        # Access the raw private vehicle data
-        raw_data = getattr(vehicle, "_vehicle_data", {})
-        ev_status = raw_data.get("vehicleStatus", {}).get("evStatus", {})
+    # Access the raw private vehicle data
+    raw_data = getattr(vehicle, "_vehicle_data", {})
+    ev_status = raw_data.get("vehicleStatus", {}).get("evStatus", {})
 
-        logger.info(f"Found evStatus keys: {list(ev_status.keys())}")
+    logger.info(f"Found evStatus keys: {list(ev_status.keys())}")
 
-        return jsonify({
-            "ev_status_raw": ev_status,
-            "keys": list(ev_status.keys()),
-        }), 200
+    return jsonify({
+        "ev_status_raw": ev_status,
+        "keys": list(ev_status.keys()),
+    }), 200
 
-    except Exception as e:
-        logger.error(f"Error in /debug_vehicle: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
 
 # ── Error Handlers ──
 @app.errorhandler(404)

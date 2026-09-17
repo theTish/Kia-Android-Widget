@@ -5,6 +5,9 @@ import androidx.concurrent.futures.ResolvableFuture
 import ca.thetish.kia.core.ApiResult
 import ca.thetish.kia.core.BuildConfig
 import ca.thetish.kia.core.KiaApi
+import ca.thetish.kia.core.R as CoreR
+import ca.thetish.kia.core.KiaColors
+import ca.thetish.kia.core.UnlockGuard
 import androidx.wear.protolayout.ActionBuilders
 import androidx.wear.protolayout.ColorBuilders.argb
 import androidx.wear.protolayout.DimensionBuilders.dp
@@ -66,9 +69,9 @@ class KiaTileService : TileService() {
     ): ListenableFuture<ResourceBuilders.Resources> {
         val resources = ResourceBuilders.Resources.Builder()
             .setVersion(RESOURCES_VERSION)
-            .addIdToImageMapping(IMG_LOCK, drawable(R.drawable.ic_lock))
-            .addIdToImageMapping(IMG_UNLOCK, drawable(R.drawable.ic_unlock))
-            .addIdToImageMapping(IMG_CLIMATE, drawable(R.drawable.ic_climate))
+            .addIdToImageMapping(IMG_LOCK, drawable(CoreR.drawable.ic_lock))
+            .addIdToImageMapping(IMG_UNLOCK, drawable(CoreR.drawable.ic_unlock))
+            .addIdToImageMapping(IMG_CLIMATE, drawable(CoreR.drawable.ic_climate))
             .build()
 
         return ResolvableFuture.create<ResourceBuilders.Resources>().apply { set(resources) }
@@ -108,11 +111,11 @@ class KiaTileService : TileService() {
             // and a watch screen is easy to brush against. Make it deliberate.
             ID_UNLOCK -> {
                 val now = SystemClock.elapsedRealtime()
-                if (now < TileState.armedUntil) {
+                if (UnlockGuard.shouldFire(now, TileState.armedUntil)) {
                     TileState.armedUntil = 0L
                     send("Unlocking") { KiaApi.unlock() }
                 } else {
-                    TileState.armedUntil = now + ARM_WINDOW_MS
+                    TileState.armedUntil = UnlockGuard.armUntil(now)
                     TileState.message = "Tap again to unlock"
                 }
             }
@@ -123,18 +126,21 @@ class KiaTileService : TileService() {
         TileState.busy = true
         TileState.message = "$label…"
 
+        // Captured outside the lambda: referencing applicationContext inside it
+        // would capture this Service and hold it for the length of the call.
+        val ctx = applicationContext
         worker.execute {
             val result = call()
             TileState.message = result.message.take(28)
             TileState.busy = false
-            getUpdater(applicationContext).requestUpdate(KiaTileService::class.java)
+            getUpdater(ctx).requestUpdate(KiaTileService::class.java)
         }
     }
 
     // ── layout ──
 
     private fun buildLayout(): LayoutElementBuilders.LayoutElement {
-        val armed = SystemClock.elapsedRealtime() < TileState.armedUntil
+        val armed = UnlockGuard.shouldFire(SystemClock.elapsedRealtime(), TileState.armedUntil)
 
         val stack = LayoutElementBuilders.Column.Builder()
             .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
@@ -324,9 +330,6 @@ class KiaTileService : TileService() {
         const val ID_UNLOCK = "unlock"
         const val ID_CLIMATE = "climate"
 
-        /** How long a first unlock tap stays armed. */
-        const val ARM_WINDOW_MS = 10_000L
-
         // 62dp clears the 48dp touch-target floor with room to spare, and two
         // of them plus a 20dp gap is 144dp across, inside the 173dp the
         // narrower watch offers at that height.
@@ -339,15 +342,16 @@ class KiaTileService : TileService() {
         const val PILL_WIDTH = 130f
         const val PILL_HEIGHT = 48f
 
-        const val COLOR_LOCK = 0xFF2E7D32.toInt()
-        const val COLOR_LOCK_DIM = 0xFF1F2A2F.toInt()
-        const val COLOR_UNLOCK = 0xFF37474F.toInt()
-        const val COLOR_ARMED = 0xFFB4560A.toInt()
-        const val COLOR_ARMED_TEXT = 0xFFFFB74D.toInt()
-        const val COLOR_CLIMATE = 0xFF1565C0.toInt()
-        const val COLOR_CLIMATE_DIM = 0xFF10243A.toInt()
-        const val COLOR_TEXT = 0xFFFFFFFF.toInt()
-        const val COLOR_TEXT_DIM = 0xFFB0BEC5.toInt()
-        const val COLOR_TEXT_MUTED = 0xFF6D7B82.toInt()
+        // Shared with the phone app and widget via :core, so the surfaces match.
+        val COLOR_LOCK = KiaColors.LOCK.toInt()
+        val COLOR_LOCK_DIM = KiaColors.LOCK_DIM.toInt()
+        val COLOR_UNLOCK = KiaColors.UNLOCK.toInt()
+        val COLOR_ARMED = KiaColors.ARMED.toInt()
+        val COLOR_ARMED_TEXT = KiaColors.ARMED_TEXT.toInt()
+        val COLOR_CLIMATE = KiaColors.CLIMATE.toInt()
+        val COLOR_CLIMATE_DIM = KiaColors.CLIMATE_DIM.toInt()
+        val COLOR_TEXT = KiaColors.TEXT.toInt()
+        val COLOR_TEXT_DIM = KiaColors.TEXT_DIM.toInt()
+        val COLOR_TEXT_MUTED = KiaColors.TEXT_MUTED.toInt()
     }
 }

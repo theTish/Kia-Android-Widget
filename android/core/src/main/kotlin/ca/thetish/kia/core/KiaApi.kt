@@ -9,7 +9,11 @@ import java.net.URL
 data class ApiResult(val ok: Boolean, val message: String)
 
 /**
- * The slice of /status worth putting on a widget.
+ * The slice of /status the clients actually render.
+ *
+ * Deliberately narrow: /status returns a great deal more (windows, warnings,
+ * service intervals, climate readback), and this grows when something needs it
+ * rather than carrying fields nothing reads.
  *
  * Every field is nullable because the car reports what it feels like reporting:
  * a value missing from the response is normal, not an error.
@@ -17,15 +21,8 @@ data class ApiResult(val ok: Boolean, val message: String)
 data class VehicleStatus(
     val batteryPercent: Int?,
     val isCharging: Boolean,
-    val pluggedIn: Boolean,
-    val plugType: String?,
     val isLocked: Boolean?,
     val range: Int?,
-    val rangeUnit: String?,
-    val chargingEta: String?,
-    val anyDoorOpen: Boolean?,
-    val anyWindowOpen: Boolean?,
-    val lastUpdated: String?,
 )
 
 /** A status read: the parsed state, or why it could not be read. */
@@ -42,43 +39,32 @@ object KiaApi {
     // The car can take a while to answer a command, so this is generous.
     private const val TIMEOUT_MS = 45_000
 
+    private val Int.isOk get() = this in 200..299
+
     fun lock(): ApiResult = command("/lock_car", null)
 
     fun unlock(): ApiResult = command("/unlock_car", null)
 
     fun startClimate(preset: String): ApiResult =
-        command("/start_climate", """{"preset":"$preset"}""")
+        command("/start_climate", JSONObject().put("preset", preset).toString())
 
-    /** Reads /status and parses the bits the widget shows. */
+    /** Reads /status and parses the bits the clients show. */
     fun status(): StatusResult {
         val (code, text, error) = request("/status", null)
 
         if (error != null) return StatusResult(false, error, null)
-        if (code !in 200..299) {
-            return StatusResult(false, field(text, "error") ?: "HTTP $code", null)
-        }
+        if (!code.isOk) return StatusResult(false, field(text, "error") ?: "HTTP $code", null)
 
         return try {
             val json = JSONObject(text)
-            val range = json.optJSONObject("range")
-            val doors = json.optJSONObject("doors")
-            val windows = json.optJSONObject("windows")
-
             StatusResult(
                 ok = true,
                 message = "Updated",
                 status = VehicleStatus(
                     batteryPercent = json.intOrNull("battery_percentage"),
                     isCharging = json.optBoolean("is_charging", false),
-                    pluggedIn = json.optBoolean("plugged_in", false),
-                    plugType = json.stringOrNull("plug_type"),
                     isLocked = json.boolOrNull("is_locked"),
-                    range = range?.intOrNull("ev"),
-                    rangeUnit = range?.stringOrNull("unit"),
-                    chargingEta = json.stringOrNull("charging_eta"),
-                    anyDoorOpen = doors?.anyTrue(),
-                    anyWindowOpen = windows?.anyTrue(),
-                    lastUpdated = json.stringOrNull("last_updated_at"),
+                    range = json.optJSONObject("range")?.intOrNull("ev"),
                 ),
             )
         } catch (e: Exception) {
@@ -91,7 +77,7 @@ object KiaApi {
 
         if (error != null) return ApiResult(false, error)
 
-        return if (code in 200..299) {
+        return if (code.isOk) {
             ApiResult(true, field(text, "status") ?: "Done")
         } else {
             // The API reports failures as {"error": "..."}; fall back to the code.
@@ -105,35 +91,37 @@ object KiaApi {
             return Triple(0, "", "No key in build")
         }
 
-        var conn: HttpURLConnection? = null
         return try {
-            conn = (URL(BuildConfig.KIA_BASE_URL + path).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = TIMEOUT_MS
-                readTimeout = TIMEOUT_MS
-                doOutput = true
-                setRequestProperty("Authorization", BuildConfig.KIA_SECRET)
-                setRequestProperty("Accept", "application/json")
-                setRequestProperty("Content-Type", "application/json")
-            }
+            val conn = (URL(BuildConfig.KIA_BASE_URL + path).openConnection() as HttpURLConnection)
+                .apply {
+                    requestMethod = "POST"
+                    connectTimeout = TIMEOUT_MS
+                    readTimeout = TIMEOUT_MS
+                    doOutput = true
+                    setRequestProperty("Authorization", BuildConfig.KIA_SECRET)
+                    setRequestProperty("Accept", "application/json")
+                    setRequestProperty("Content-Type", "application/json")
+                }
 
             conn.outputStream.use { it.write((body ?: "{}").toByteArray(Charsets.UTF_8)) }
 
             val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val stream = if (code.isOk) conn.inputStream else conn.errorStream
             val text = stream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
 
+            // No disconnect(): closing the streams above returns the socket to the
+            // keep-alive pool. A command is nearly always followed by a /status to
+            // the same host, and disconnecting makes that pay for a fresh TLS
+            // handshake.
             Triple(code, text, null)
         } catch (e: Exception) {
             Triple(0, "", e.message?.takeIf { it.isNotBlank() } ?: "Network error")
-        } finally {
-            conn?.disconnect()
         }
     }
 
-    /** Pulls one string field out of a flat JSON object, for the command replies. */
+    /** Pulls one string field out of a reply, for the command messages. */
     private fun field(json: String, key: String): String? =
-        Regex("\"$key\"\\s*:\\s*\"([^\"]*)\"").find(json)?.groupValues?.get(1)
+        runCatching { JSONObject(json).stringOrNull(key) }.getOrNull()
 
     // JSON null and absent both mean "unknown", so both come back as null here
     // rather than as optInt's 0 or optBoolean's false.
@@ -145,15 +133,4 @@ object KiaApi {
 
     private fun JSONObject.stringOrNull(key: String): String? =
         if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
-
-    /** True if any member is true, null if every member is unknown. */
-    private fun JSONObject.anyTrue(): Boolean? {
-        var sawValue = false
-        for (key in keys()) {
-            if (isNull(key)) continue
-            sawValue = true
-            if (optBoolean(key)) return true
-        }
-        return if (sawValue) false else null
-    }
 }

@@ -38,21 +38,22 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
+import ca.thetish.kia.core.KiaColors
+import ca.thetish.kia.core.UnlockGuard
 
-/** Matching the watch tile, so the two surfaces read as one product. */
+/** Local aliases for the shared tokens in :core, so the layout below stays readable. */
 private object Palette {
-    val background = Color(0xFF101418)
-    val lock = Color(0xFF2E7D32)
-    val lockDim = Color(0xFF1F2A2F)
-    val unlock = Color(0xFF37474F)
-    val unlockDim = Color(0xFF1F2A2F)
-    val armed = Color(0xFFB4560A)
-    val armedText = Color(0xFFFFB74D)
-    val climate = Color(0xFF1565C0)
-    val climateDim = Color(0xFF10243A)
-    val neutral = Color(0xFF263238)
-    val text = Color(0xFFFFFFFF)
-    val textDim = Color(0xFFB0BEC5)
+    val background = Color(KiaColors.BACKGROUND)
+    val lock = Color(KiaColors.LOCK)
+    val lockDim = Color(KiaColors.LOCK_DIM)
+    val unlock = Color(KiaColors.UNLOCK)
+    val armed = Color(KiaColors.ARMED)
+    val armedText = Color(KiaColors.ARMED_TEXT)
+    val climate = Color(KiaColors.CLIMATE)
+    val climateDim = Color(KiaColors.CLIMATE_DIM)
+    val neutral = Color(KiaColors.NEUTRAL)
+    val text = Color(KiaColors.TEXT)
+    val textDim = Color(KiaColors.TEXT_DIM)
 }
 
 /** Widget state. Survives reboots, which is why the arming window is stored too. */
@@ -61,8 +62,8 @@ internal object Keys {
     val busy = booleanPreferencesKey("busy")
     val battery = intPreferencesKey("battery")
     val range = intPreferencesKey("range")
+    // Absent means "unknown", which must not render as "unlocked".
     val locked = booleanPreferencesKey("locked")
-    val lockedKnown = booleanPreferencesKey("locked_known")
     val charging = booleanPreferencesKey("charging")
     val armedUntil = longPreferencesKey("armed_until")
 }
@@ -88,10 +89,9 @@ class KiaWidget : GlanceAppWidget() {
         val busy = prefs[Keys.busy] ?: false
         val battery = prefs[Keys.battery]
         val range = prefs[Keys.range]
-        // Two keys, because "unknown" and "unlocked" must not render the same.
-        val locked = if (prefs[Keys.lockedKnown] == true) prefs[Keys.locked] else null
+        val locked = prefs[Keys.locked]
         val charging = prefs[Keys.charging] ?: false
-        val armed = (prefs[Keys.armedUntil] ?: 0L) > SystemClock.elapsedRealtime()
+        val armed = UnlockGuard.shouldFire(SystemClock.elapsedRealtime(), prefs[Keys.armedUntil] ?: 0L)
 
         Column(
             modifier = GlanceModifier
@@ -127,7 +127,7 @@ class KiaWidget : GlanceAppWidget() {
                     label = if (armed) "Confirm" else "Unlock",
                     color = when {
                         armed -> Palette.armed
-                        busy -> Palette.unlockDim
+                        busy -> Palette.lockDim
                         else -> Palette.unlock
                     },
                     onClick = actionRunCallback<UnlockAction>(),
@@ -208,13 +208,6 @@ class KiaWidgetReceiver : GlanceAppWidgetReceiver() {
 // ── Actions ──────────────────────────────────────────────────────────────────
 
 /**
- * Unlock is two taps. The first arms it, the second sends it. Leaving a car
- * unlocked by accident is worse than an extra tap, and the same guard is in the
- * watch tile and the phone app.
- */
-private const val ARM_WINDOW_MS = 10_000L
-
-/**
  * Marks the widget busy and hands the call to KiaWorker.
  *
  * The work is deliberately not done here: see the note on KiaWorker about
@@ -228,6 +221,9 @@ private suspend fun dispatch(context: Context, id: GlanceId, label: String, acti
     }
     KiaWidget().update(context, id)
 
+    // The arming is cleared above, so a disarm job scheduled by an earlier tap
+    // would wake the device ten seconds later only to change nothing.
+    KiaWorker.cancelDisarm(context)
     KiaWorker.enqueue(context, action)
 }
 
@@ -253,23 +249,22 @@ class UnlockAction : ActionCallback {
         parameters: ActionParameters,
     ) {
         val now = SystemClock.elapsedRealtime()
-        var armed = false
+        var justArmed = false
 
         updateAppWidgetState(context, glanceId) { prefs ->
-            val armedUntil = prefs[Keys.armedUntil] ?: 0L
-            if (now < armedUntil) {
+            if (UnlockGuard.shouldFire(now, prefs[Keys.armedUntil] ?: 0L)) {
                 // Second tap inside the window: disarm and send it.
                 prefs[Keys.armedUntil] = 0L
             } else {
-                prefs[Keys.armedUntil] = now + ARM_WINDOW_MS
-                armed = true
+                prefs[Keys.armedUntil] = UnlockGuard.armUntil(now)
+                justArmed = true
             }
         }
 
-        if (armed) {
+        if (justArmed) {
             KiaWidget().update(context, glanceId)
             // Make the amber "Confirm" lapse on screen when the window lapses.
-            KiaWorker.enqueueDisarm(context, ARM_WINDOW_MS)
+            KiaWorker.enqueueDisarm(context, UnlockGuard.ARM_WINDOW_MS)
         } else {
             dispatch(context, glanceId, "Unlocking", KiaWorker.ACTION_UNLOCK)
         }

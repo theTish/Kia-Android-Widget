@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    XML mirror of KiaColors.kt, for layouts. Keep the two in step.
+    Shared by :app and :tile through resource merging.
+-->
+<resources>
+    <color name="lock">#FF2E7D32</color>
+    <color name="unlock">#FF37474F</color>
+    <color name="climate">#FF1565C0</color>
+    <color name="text">#FFFFFFFF</color>
+    <color name="text_dim">#FFB0BEC5</color>
+
+    <!--
+        Deliberately pure black, unlike KiaColors.BACKGROUND. This one backs a
+        full screen activity, where black is right on OLED; the widget and tile
+        are cards on a wallpaper and use the lighter tone so their edges read.
+    -->
+    <color name="background">#FF000000</color>
+</resources>
