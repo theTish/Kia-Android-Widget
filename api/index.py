@@ -614,8 +614,6 @@ def vehicle_status():
     logger.info("Received request to /status")
 
     try:
-        from hyundai_kia_connect_api.const import DISTANCE_UNITS
-
         refresh_token_if_needed()
         vehicle = get_cached_vehicle_state()
 
@@ -702,14 +700,16 @@ def vehicle_status():
                 "station": _int(vehicle.ev_estimated_station_charge_duration),
             },
             "battery_preconditioning": _bool(vehicle.ev_battery_precondition_enabled),
+            # The library has already mapped the raw unit code to a string
+            # ("km"/"mi") when it set these, so they are passed through as-is.
             "range": {
                 "ev": vehicle.ev_driving_range,
                 "total": vehicle.total_driving_range,
-                "unit": DISTANCE_UNITS.get(vehicle.ev_driving_range_unit),
+                "unit": vehicle.ev_driving_range_unit,
             },
             "odometer": {
                 "value": vehicle.odometer,
-                "unit": DISTANCE_UNITS.get(vehicle.odometer_unit),
+                "unit": vehicle.odometer_unit,
             },
             "is_locked": _bool(vehicle.is_locked),
             "engine_running": _bool(vehicle.engine_is_running),
