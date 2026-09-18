@@ -57,3 +57,7 @@ Glance can't use custom fonts easily — system font fallback in the widget is a
 ## Wear OS tile (`WatchTile.dc.html`)
 
 Accent battery arc around the bezel (ProtoLayout `Arc`, 6dp, track `#1A1E22`), car image ~148dp wide at top, "78% · 412 km" (30sp) with lock state under it, two 64dp circle buttons (Lock accent, Unlock surface; armed state as today), Climate pill below. Keep the existing centring-in-an-expanding-Box approach.
+
+## App icon
+
+Done and wired up: launcher icon files are in `app/src/main/res/mipmap-*` and `tile/src/main/res/mipmap-*` (adaptive foreground/background/monochrome layers at every density, plus legacy square and round PNGs), and both manifests' `<application>` now use `@mipmap/ic_launcher` / `@mipmap/ic_launcher_round`. `@drawable/ic_kia` stays on the tile service entry (the small tile glyph). `ic_launcher-512.png` in `design/` is the full-size master. Nothing to do here beyond keeping `ic_kia` if the tile still uses it.
