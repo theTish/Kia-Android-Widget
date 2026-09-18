@@ -115,6 +115,23 @@ Both clients behave the same way:
 - The status line shows the last result, taken from the API's own `status` or
   `error` field.
 
+## Which host the clients use
+
+The phone app and its widget read the API address from **Settings** on the
+device, so moving hosts is a text field. The watch tile cannot - it is a
+separate device with separate storage and no practical settings UI - so it uses
+whatever `KIA_BASE_URL` was compiled in, and moving it means a rebuild and a
+reinstall.
+
+Both default to `https://kia.tishman.ca` (the Oracle box). Vercel stays deployed
+as a standby: on the phone that is two taps in Settings, on the watch it is a
+rebuild.
+
+One catch if you ever change the tile's icons: `RESOURCES_VERSION` in
+`KiaTileService` must be bumped, or a watch that already has the tile keeps
+serving the cached images. A reinstall clears the cache, which is why moving the
+drawables into `:core` did not visibly break anything.
+
 ## Rotating the key
 
 The key is compiled in, so a rotation means editing `local.properties` and
