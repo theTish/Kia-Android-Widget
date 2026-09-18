@@ -1,96 +1,253 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+    Settings. Save is pinned to the bottom rather than sitting at the end of the
+    form: it is the only destructive-if-wrong control here, and it should be in
+    the same place whether or not the Test result has pushed the form down.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/background"
-    android:padding="24dp">
+    android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingTop="20dp"
+        android:paddingEnd="16dp">
+
+        <ImageButton
+            android:id="@+id/back"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/icon_button"
+            android:contentDescription="@string/back"
+            android:scaleType="center"
+            android:src="@drawable/ic_back"
+            android:tint="@color/text" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/label_base_url"
-            android:textColor="@color/text_dim"
-            android:textSize="14sp" />
-
-        <AutoCompleteTextView
-            android:id="@+id/base_url"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="20dp"
-            android:completionThreshold="0"
-            android:hint="@string/hint_base_url"
-            android:inputType="textUri"
+            android:layout_marginStart="4dp"
+            android:fontFamily="@font/chakra_petch_semibold"
+            android:letterSpacing="0.04"
+            android:text="@string/settings_title"
             android:textColor="@color/text"
-            android:textColorHint="@color/text_dim" />
+            android:textSize="22sp" />
+
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingStart="16dp"
+        android:paddingTop="24dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="16dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                style="@style/FieldLabel"
+                android:text="@string/label_base_url" />
+
+            <!-- Suggestions, not a closed list: typing a new host is the whole
+                 point if the API ever moves again. -->
+            <AutoCompleteTextView
+                android:id="@+id/base_url"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="@drawable/field"
+                android:completionThreshold="0"
+                android:dropDownVerticalOffset="4dp"
+                android:hint="@string/hint_base_url"
+                android:importantForAutofill="no"
+                android:inputType="textUri"
+                android:maxLines="1"
+                android:paddingStart="18dp"
+                android:paddingEnd="18dp"
+                android:textColor="@color/text"
+                android:textColorHint="@color/text_muted"
+                android:textSize="16sp" />
+
+            <TextView
+                style="@style/FieldLabel"
+                android:layout_marginTop="22dp"
+                android:text="@string/label_secret" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="@drawable/field"
+                android:gravity="center_vertical"
+                android:paddingStart="18dp"
+                android:paddingEnd="4dp">
+
+                <EditText
+                    android:id="@+id/secret"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@null"
+                    android:hint="@string/hint_secret"
+                    android:importantForAutofill="no"
+                    android:inputType="textPassword"
+                    android:maxLines="1"
+                    android:textColor="@color/text"
+                    android:textColorHint="@color/text_muted"
+                    android:textSize="16sp" />
+
+                <ImageButton
+                    android:id="@+id/reveal"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@drawable/icon_button"
+                    android:contentDescription="@string/show_key"
+                    android:scaleType="center"
+                    android:src="@drawable/ic_eye"
+                    android:tint="@color/text_dim" />
+
+            </LinearLayout>
+
+            <TextView
+                style="@style/FieldLabel"
+                android:layout_marginTop="22dp"
+                android:text="@string/label_preset" />
+
+            <LinearLayout
+                android:id="@+id/preset_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/segment_group"
+                android:padding="4dp">
+
+                <TextView
+                    android:id="@+id/preset_winter"
+                    style="@style/Segment"
+                    android:text="@string/preset_winter" />
+
+                <TextView
+                    android:id="@+id/preset_summer"
+                    style="@style/Segment"
+                    android:text="@string/preset_summer" />
+
+                <TextView
+                    android:id="@+id/preset_springfall"
+                    style="@style/Segment"
+                    android:text="@string/preset_springfall" />
+
+            </LinearLayout>
+
+            <TextView
+                style="@style/FieldLabel"
+                android:layout_marginTop="22dp"
+                android:text="@string/label_widget_background" />
+
+            <LinearLayout
+                android:id="@+id/background_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/segment_group"
+                android:padding="4dp">
+
+                <TextView
+                    android:id="@+id/background_glass"
+                    style="@style/Segment"
+                    android:text="@string/background_glass" />
+
+                <TextView
+                    android:id="@+id/background_solid"
+                    style="@style/Segment"
+                    android:text="@string/background_solid" />
+
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/test"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="28dp"
+                android:background="@drawable/pill_outline"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="@font/manrope_semibold"
+                android:gravity="center"
+                android:text="@string/test_connection"
+                android:textColor="@color/text"
+                android:textSize="16sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center">
+
+                <ImageView
+                    android:id="@+id/test_icon"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_marginEnd="8dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_check"
+                    android:tint="@color/accent"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+
+                <TextView
+                    android:id="@+id/test_result"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_dim"
+                    android:textSize="14sp"
+                    tools:text="Works — battery 78%" />
+
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginTop="28dp"
+                android:layout_marginEnd="4dp"
+                android:lineSpacingExtra="4dp"
+                android:text="@string/settings_footnote"
+                android:textColor="@color/text_muted"
+                android:textSize="13sp" />
+
+        </LinearLayout>
+    </ScrollView>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="24dp">
 
         <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/label_secret"
-            android:textColor="@color/text_dim"
-            android:textSize="14sp" />
-
-        <EditText
-            android:id="@+id/secret"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="20dp"
-            android:hint="@string/hint_secret"
-            android:inputType="textPassword"
-            android:textColor="@color/text"
-            android:textColorHint="@color/text_dim" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/label_preset"
-            android:textColor="@color/text_dim"
-            android:textSize="14sp" />
-
-        <Spinner
-            android:id="@+id/preset"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="24dp" />
-
-        <Button
-            android:id="@+id/test"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:backgroundTint="@color/unlock"
-            android:text="@string/test_connection"
-            android:textColor="@color/text" />
-
-        <TextView
-            android:id="@+id/test_result"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:layout_marginBottom="20dp"
-            android:gravity="center"
-            android:textColor="@color/text_dim"
-            android:textSize="14sp" />
-
-        <Button
             android:id="@+id/save"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:backgroundTint="@color/lock"
+            android:background="@drawable/pill_accent"
+            android:clickable="true"
+            android:focusable="true"
+            android:fontFamily="@font/manrope_bold"
+            android:gravity="center"
             android:text="@string/save"
-            android:textColor="@color/text" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="@string/settings_footnote"
-            android:textColor="@color/text_dim"
-            android:textSize="12sp" />
+            android:textColor="@color/accent_ink"
+            android:textSize="16sp" />
 
     </LinearLayout>
-</ScrollView>
+
+</LinearLayout>

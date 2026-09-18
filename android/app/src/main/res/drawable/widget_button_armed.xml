@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The armed unlock, on either skin. Amber is opaque on purpose: the glass
+    button's translucency is fine for a neutral control and wrong for the one
+    that is about to open the car.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="24dp" />
+    <solid android:color="@color/armed" />
+</shape>

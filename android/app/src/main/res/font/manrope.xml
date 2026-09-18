@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Body text. Bundled rather than fetched through the downloadable-fonts
+    provider: that provider needs Play Services and a network round trip, and
+    the first paint of a screen you opened to check whether the car is locked is
+    the worst possible moment to fall back to Roboto.
+-->
+<font-family xmlns:android="http://schemas.android.com/apk/res/android">
+    <font android:font="@font/manrope_regular" android:fontWeight="400" android:fontStyle="normal" />
+    <font android:font="@font/manrope_medium" android:fontWeight="500" android:fontStyle="normal" />
+    <font android:font="@font/manrope_semibold" android:fontWeight="600" android:fontStyle="normal" />
+    <font android:font="@font/manrope_bold" android:fontWeight="700" android:fontStyle="normal" />
+</font-family>

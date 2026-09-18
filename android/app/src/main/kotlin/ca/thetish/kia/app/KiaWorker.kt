@@ -3,6 +3,7 @@ package ca.thetish.kia.app
 import android.content.Context
 import android.os.SystemClock
 import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.Preferences
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.appwidget.updateAll
@@ -97,7 +98,10 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
             prefs[Keys.busy] = false
             if (result.ok && status != null) {
                 prefs.store(status)
-                if (announce) prefs[Keys.message] = "Updated"
+                // The widget now shows the real numbers, so "Updated" would only
+                // take the line the charge state wants. An explicit Refresh does
+                // clear whatever the last action left there, though.
+                if (announce) prefs[Keys.message] = ""
             } else if (announce) {
                 prefs[Keys.message] = result.message
             }
@@ -118,15 +122,27 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
         if (redraw) KiaWidget().updateAll(applicationContext)
     }
 
+    /**
+     * Copies the car's answer into the widget's state.
+     *
+     * Removing the key is how "unknown" is stored: an absent preference reads
+     * back as null. That matters beyond lock state - the EV6 regularly answers
+     * with no EV data at all, and leaving the last known battery in place would
+     * have the widget presenting an old reading as a current one.
+     */
     private fun MutablePreferences.store(status: VehicleStatus) {
-        status.batteryPercent?.let { this[Keys.battery] = it }
-        status.range?.let { this[Keys.range] = it }
-        this[Keys.charging] = status.isCharging
+        set(Keys.battery, status.batteryPercent)
+        set(Keys.range, status.range)
+        set(Keys.locked, status.isLocked)
+        set(Keys.chargeRemaining, status.chargeRemainingText)
+        set(Keys.chargeLimitAc, status.chargeLimitAc)
 
-        // Removing the key is how "unknown" is stored: an absent preference
-        // reads back as null, which must not render as "unlocked".
-        val locked = status.isLocked
-        if (locked == null) remove(Keys.locked) else this[Keys.locked] = locked
+        this[Keys.charging] = status.isCharging
+        this[Keys.pluggedIn] = status.pluggedIn
+    }
+
+    private fun <T : Any> MutablePreferences.set(key: Preferences.Key<T>, value: T?) {
+        if (value == null) remove(key) else this[key] = value
     }
 
     companion object {

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The accent bloom under the wheels, which is all that stops the car floating
+    in the black.
+
+    The radius is a dimension rather than a percentage on purpose: a percentage
+    resolves against the shorter side, and on a 300x44dp strip that is a small
+    circle hidden entirely behind the car. It has to be wider than the car to
+    show at all, since that is the only place the render is transparent.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <gradient
+        android:centerX="0.5"
+        android:centerY="0.5"
+        android:gradientRadius="170dp"
+        android:startColor="#38CEDE27"
+        android:endColor="#00CEDE27"
+        android:type="radial" />
+</shape>

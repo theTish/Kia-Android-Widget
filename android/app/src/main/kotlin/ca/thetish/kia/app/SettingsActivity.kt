@@ -4,16 +4,23 @@ import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.InputType
+import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
-import android.widget.Button
 import android.widget.EditText
-import android.widget.Spinner
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.glance.appwidget.updateAll
 import ca.thetish.kia.core.KiaApi
 import ca.thetish.kia.core.KiaConfig
 import ca.thetish.kia.core.KiaSettings
+import ca.thetish.kia.core.R as CoreR
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
 /**
@@ -35,8 +42,12 @@ class SettingsActivity : Activity() {
 
     private lateinit var baseUrl: AutoCompleteTextView
     private lateinit var secret: EditText
-    private lateinit var preset: Spinner
+    private lateinit var reveal: ImageButton
     private lateinit var result: TextView
+    private lateinit var resultIcon: ImageView
+
+    private lateinit var presets: Segments
+    private lateinit var backgrounds: Segments
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,76 +55,150 @@ class SettingsActivity : Activity() {
 
         baseUrl = findViewById(R.id.base_url)
         secret = findViewById(R.id.secret)
-        preset = findViewById(R.id.preset)
+        reveal = findViewById(R.id.reveal)
         result = findViewById(R.id.test_result)
+        resultIcon = findViewById(R.id.test_icon)
 
-        // The known hosts are suggestions, not a closed list - typing a new one
-        // is the whole point if this ever moves again.
         baseUrl.setAdapter(
             ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, KiaSettings.KNOWN_HOSTS)
         )
         baseUrl.setOnClickListener { baseUrl.showDropDown() }
 
-        // Own layouts for both states: the platform ones take their colour from
-        // the theme and rendered invisible on this black background.
-        preset.adapter = ArrayAdapter(this, R.layout.spinner_item, KiaSettings.PRESETS).apply {
-            setDropDownViewResource(R.layout.spinner_item)
-        }
+        presets = Segments(
+            KiaSettings.PRESETS.zip(
+                listOf(R.id.preset_winter, R.id.preset_summer, R.id.preset_springfall)
+            )
+        )
+        backgrounds = Segments(
+            KiaSettings.BACKGROUNDS.zip(listOf(R.id.background_glass, R.id.background_solid))
+        )
 
         val current = KiaSettings.load(this)
         baseUrl.setText(current.baseUrl)
         secret.setText(current.secret)
-        preset.setSelection(
-            KiaSettings.PRESETS.indexOf(current.climatePreset).takeIf { it >= 0 } ?: 0
-        )
+        presets.select(current.climatePreset)
+        backgrounds.select(KiaSettings.widgetBackground(this))
 
-        findViewById<Button>(R.id.test).setOnClickListener { test() }
+        reveal.setOnClickListener { toggleReveal() }
+        findViewById<ImageButton>(R.id.back).setOnClickListener { finish() }
+        findViewById<TextView>(R.id.test).setOnClickListener { test() }
+        findViewById<TextView>(R.id.save).setOnClickListener { save() }
+    }
 
-        findViewById<Button>(R.id.save).setOnClickListener {
-            KiaSettings.save(this, baseUrl.text.toString(), secret.text.toString(), selectedPreset())
-            Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
-            finish()
+    /**
+     * A segmented control over a row of TextViews.
+     *
+     * Replaces the Spinner, which needed two custom layouts to stay visible on
+     * black and still hid three options behind a tap. Three fixed choices fit
+     * on one line, so show all three.
+     */
+    private inner class Segments(private val options: List<Pair<String, Int>>) {
+
+        private var chosen: String = options.first().first
+
+        init {
+            for ((value, id) in options) {
+                findViewById<TextView>(id).setOnClickListener { select(value) }
+            }
+        }
+
+        val value: String get() = chosen
+
+        fun select(value: String) {
+            chosen = options.firstOrNull { it.first == value }?.first ?: options.first().first
+            for ((option, id) in options) {
+                val selected = option == chosen
+                findViewById<TextView>(id).apply {
+                    setBackgroundResource(
+                        if (selected) R.drawable.segment_selected else R.drawable.segment_idle
+                    )
+                    setTextColor(getColor(if (selected) CoreR.color.text else CoreR.color.text_dim))
+                    isSelected = selected
+                }
+            }
         }
     }
 
-    private fun selectedPreset(): String =
-        preset.selectedItem?.toString() ?: KiaSettings.PRESETS.first()
+    private fun toggleReveal() {
+        val hidden = secret.inputType and InputType.TYPE_TEXT_VARIATION_PASSWORD != 0
+        // Reassigning inputType resets the selection, so put the caret back.
+        val caret = secret.selectionEnd
+        secret.inputType = InputType.TYPE_CLASS_TEXT or
+            if (hidden) InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            else InputType.TYPE_TEXT_VARIATION_PASSWORD
+        secret.setSelection(caret.coerceIn(0, secret.text.length))
+        reveal.setImageResource(if (hidden) CoreR.drawable.ic_eye_off else CoreR.drawable.ic_eye)
+    }
+
+    private fun entered() = KiaConfig(
+        baseUrl = baseUrl.text.toString().trim().trimEnd('/'),
+        secret = secret.text.toString().trim(),
+        climatePreset = presets.value,
+    )
 
     /**
      * Checks the entered values against the API before they are saved, so a
      * typo shows up here rather than as a failed lock in a car park.
      */
     private fun test() {
-        val candidate = KiaConfig(
-            baseUrl = baseUrl.text.toString().trim().trimEnd('/'),
-            secret = secret.text.toString().trim(),
-            climatePreset = selectedPreset(),
-        )
+        val candidate = entered()
 
         if (!candidate.isUsable) {
-            result.text = getString(R.string.test_needs_values)
+            showResult(getString(R.string.test_needs_values), ok = false)
             return
         }
 
-        result.text = getString(R.string.testing)
+        showResult(getString(R.string.testing), ok = false)
         io.execute {
             // Deliberately /status: it proves the URL, the key and the car all
             // work, and it changes nothing.
             val outcome = KiaApi.status(candidate)
             main.post {
                 if (isDestroyed) return@post
-                val status = outcome.status
-                val battery = status?.batteryPercent
-                result.text = when {
+                val battery = outcome.status?.batteryPercent
+                when {
                     // Never invent a number: the car sometimes answers without
                     // any EV data at all, and "battery 0%" would read as a flat
                     // battery rather than as "not reported".
-                    outcome.ok && battery != null -> getString(R.string.test_ok, battery)
-                    outcome.ok -> getString(R.string.test_ok_no_data)
-                    else -> getString(R.string.test_failed, outcome.message)
+                    outcome.ok && battery != null ->
+                        showResult(getString(R.string.test_ok, battery), ok = true)
+
+                    outcome.ok -> showResult(getString(R.string.test_ok_no_data), ok = true)
+
+                    else -> showResult(
+                        getString(R.string.test_failed, outcome.message),
+                        ok = false,
+                    )
                 }
             }
         }
+    }
+
+    private fun showResult(text: String, ok: Boolean) {
+        result.text = text
+        result.setTextColor(getColor(if (ok) CoreR.color.accent else CoreR.color.text_dim))
+        resultIcon.visibility = if (ok) View.VISIBLE else View.GONE
+    }
+
+    private fun save() {
+        val entered = entered()
+        KiaSettings.save(
+            context = this,
+            baseUrl = entered.baseUrl,
+            secret = entered.secret,
+            climatePreset = entered.climatePreset,
+            widgetBackground = backgrounds.value,
+        )
+
+        // The widget reads its background at compose time, so a change here is
+        // invisible until something redraws it - and nothing otherwise would
+        // until the next tap. Hoisted out of the lambda so the coroutine holds
+        // the application rather than this Activity.
+        val app = applicationContext
+        CoroutineScope(Dispatchers.Default).launch { KiaWidget().updateAll(app) }
+
+        Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
+        finish()
     }
 
     override fun onDestroy() {

@@ -13,6 +13,18 @@ import org.json.JSONObject
  * null on this EV6 always; EV battery and range go null whenever Kia's cached
  * view is stale. Anything unknown must render as unknown, never as zero or as
  * a cheerful default.
+ *
+ * Range is the awkward one: when it is not known it comes back as 0 rather than
+ * as null. Seen on 2026-09-17, reading 0km beside a 73% battery, during a Kia
+ * maintenance window - the rest of the payload carried last-known values while
+ * range alone was zeroed, and a forced live poll returned the same 0 because it
+ * went through the same unavailable upstream.
+ *
+ * So 0 maps to null here. Not because the car is shrugging - it is Kia being
+ * down - but because "0 km" beside a three-quarters-full battery is a reading
+ * nobody should act on, and an outage is exactly when a client should say it
+ * does not know. A car genuinely out of charge has a battery percentage to say
+ * so.
  */
 data class VehicleStatus(
     // Charge
@@ -36,8 +48,10 @@ data class VehicleStatus(
     // Security
     val isLocked: Boolean?,
     val engineRunning: Boolean?,
-    /** Human names of anything standing open, empty when all shut. */
-    val openings: List<String>,
+    /** Human names of any door or boot standing open, empty when all shut. */
+    val doorsOpen: List<String>,
+    /** Human names of any window standing open, empty when all shut. */
+    val windowsOpen: List<String>,
     /** True only if the car actually reported window state; this EV6 never does. */
     val windowsReported: Boolean,
 
@@ -58,6 +72,16 @@ data class VehicleStatus(
     val lastUpdated: String?,
 ) {
     val hasEvData: Boolean get() = batteryPercent != null
+
+    /**
+     * Everything standing open, in one list.
+     *
+     * The two are kept apart above because the home screen lists doors and
+     * windows on separate rows, and windows have their own "the car never says"
+     * case; anywhere that just needs "is something open" wants them together.
+     */
+    val openings: List<String>
+        get() = doorsOpen + windowsOpen.map { "$it window" }
 
     companion object {
         private val OPENING_LABELS = mapOf(
@@ -90,11 +114,6 @@ data class VehicleStatus(
             val doors = json.optJSONObject("doors")
             val windows = json.optJSONObject("windows")
 
-            val openings = buildList {
-                addAll(namesOfTrue(doors))
-                addAll(namesOfTrue(windows).map { "$it window" })
-            }
-
             return VehicleStatus(
                 batteryPercent = json.intOrNull("battery_percentage"),
                 battery12v = json.intOrNull("battery_12v"),
@@ -107,14 +126,15 @@ data class VehicleStatus(
                 chargeLimitDc = limits?.intOrNull("dc"),
                 batteryPreconditioning = json.boolOrNull("battery_preconditioning"),
 
-                range = range?.doubleOrNull("ev")?.toInt(),
+                range = range?.doubleOrNull("ev")?.toInt()?.takeIf { it > 0 },
                 rangeUnit = range?.stringOrNull("unit"),
                 odometer = odo?.doubleOrNull("value"),
                 odometerUnit = odo?.stringOrNull("unit"),
 
                 isLocked = json.boolOrNull("is_locked"),
                 engineRunning = json.boolOrNull("engine_running"),
-                openings = openings,
+                doorsOpen = namesOfTrue(doors),
+                windowsOpen = namesOfTrue(windows),
                 windowsReported = windows?.keys()?.asSequence()
                     ?.any { !windows.isNull(it) } ?: false,
 
