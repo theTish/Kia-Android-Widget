@@ -10,6 +10,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY api/ ./api/
 
+# Stamped by deploy/kia-deploy.sh. Last so a new commit does not invalidate the
+# dependency layers above it - the whole point is that this changes every time.
+ARG GIT_SHA=unknown
+ENV KIA_GIT_SHA=$GIT_SHA
+
 # ONE worker on purpose. Each gunicorn worker is its own process with its own
 # VehicleManager, token and vehicle list, so N workers would mean N logins to
 # Kia and N chances to trip its rate limiter - the exact thing moving off

@@ -27,7 +27,16 @@ echo "=== $(date -Is) deploy starting ==="
 [ -d "$REPO" ]     || { echo "FATAL: $REPO missing"; exit 1; }
 
 cd "$REPO"
+
+# On a branch, tracking something, and that something is what you think: this
+# script ran happily for two sessions against a checkout sitting on a stale
+# feature branch, pulling nothing and rebuilding the same code every time.
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+[ "$BRANCH" = "main" ] || { echo "FATAL: on branch '$BRANCH', expected main"; exit 1; }
+
 git pull --ff-only
+SHA=$(git rev-parse --short HEAD)
+echo "deploying $SHA"
 
 # Keep the current image so a bad build has something to fall back to.
 if docker image inspect "$IMAGE:latest" >/dev/null 2>&1; then
@@ -36,7 +45,7 @@ if docker image inspect "$IMAGE:latest" >/dev/null 2>&1; then
 fi
 
 # Build while the old container is still serving - a failed build costs nothing.
-docker build -f deploy/Dockerfile -t "$IMAGE:latest" .
+docker build -f deploy/Dockerfile --build-arg GIT_SHA="$SHA" -t "$IMAGE:latest" .
 
 start_container() {
   local tag="$1"
@@ -57,6 +66,17 @@ start_container latest
 for i in $(seq 1 30); do
   if curl -fsS -m 5 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
     echo "healthy after ${i}s"
+
+    # Ask the thing that is actually running what it is, rather than trusting
+    # that the build and the checkout agreed.
+    RUNNING=$(curl -fsS -m 5 "http://127.0.0.1:${PORT}/health" \
+      | sed -n 's/.*"revision":"\([^"]*\)".*/\1/p')
+    if [ "$RUNNING" != "$SHA" ]; then
+      echo "FATAL: serving '$RUNNING' but deployed '$SHA' - rolling back"
+      start_container previous
+      exit 1
+    fi
+    echo "serving $RUNNING"
     docker image prune -f >/dev/null 2>&1 || true
     echo "=== $(date -Is) deploy OK ==="
     exit 0

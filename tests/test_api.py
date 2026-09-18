@@ -157,6 +157,10 @@ print("\n--- /otp/status + /diagnostics ---")
 reset()
 check("/otp/status 200", client.get("/otp/status").status_code == 200)
 check("/diagnostics 200", client.get("/diagnostics").status_code == 200)
+# The deploy script reads this back out of /health to confirm it is serving
+# what it just built, so both endpoints have to carry it.
+check("/health reports a revision", "revision" in client.get("/health").get_json())
+check("/diagnostics reports a revision", "revision" in client.get("/diagnostics").get_json())
 
 print("\n" + ("ALL APP CHECKS PASSED" if not fails else f"{len(fails)} FAILURES: {fails}"))
 sys.exit(1 if fails else 0)

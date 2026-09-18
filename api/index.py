@@ -69,6 +69,26 @@ def _int(value):
     return int(value) if value is not None else None
 
 
+def _build_revision():
+    """The commit this process is running, or "unknown" if nobody said.
+
+    Worth the eight lines. Without it a deploy is unverifiable from outside:
+    /status and /health answer identically on the right code and the wrong
+    code, and on 2026-09-18 the Oracle box turned out to have spent two
+    sessions on a stale branch, rebuilding and restarting happily each time it
+    was deployed. Four attempts to ship a one-line fix went by before anyone
+    thought to look at the checkout.
+
+    deploy/kia-deploy.sh passes KIA_GIT_SHA as a build arg. Vercel sets
+    VERCEL_GIT_COMMIT_SHA on its own, in full, so it is trimmed to match.
+    """
+    return (
+        _trimmed_env("KIA_GIT_SHA")
+        or (_trimmed_env("VERCEL_GIT_COMMIT_SHA") or "")[:7]
+        or "unknown"
+    )
+
+
 def _reported_range(value):
     """Report an unknown range as null rather than as zero.
 
@@ -480,6 +500,7 @@ def health():
         "vehicle_id_set": VEHICLE_ID is not None,
         "otp_required": otp_needed,
         "otp_verified": otp_state.get("verified", False),
+        "revision": _build_revision(),
     }
 
     if is_initialized and vehicle_manager and vehicle_manager.vehicles:
@@ -514,6 +535,7 @@ def diagnostics():
     }
 
     return jsonify({
+        "revision": _build_revision(),
         "env_vars_set": {
             "KIA_USERNAME": USERNAME is not None and USERNAME != "",
             "KIA_PASSWORD": PASSWORD is not None and PASSWORD != "",
