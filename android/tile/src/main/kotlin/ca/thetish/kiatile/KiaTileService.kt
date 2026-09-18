@@ -11,6 +11,7 @@ import ca.thetish.kia.core.VehicleStatus
 import ca.thetish.kia.core.R as CoreR
 import androidx.wear.protolayout.ActionBuilders
 import androidx.wear.protolayout.ColorBuilders.argb
+import androidx.wear.protolayout.DeviceParametersBuilders
 import androidx.wear.protolayout.DimensionBuilders.degrees
 import androidx.wear.protolayout.DimensionBuilders.dp
 import androidx.wear.protolayout.DimensionBuilders.expand
@@ -67,6 +68,88 @@ private object TileState {
     var fetching: Boolean = false
 }
 
+/*
+ * Geometry, worked against the smallest round face worth supporting: a 40mm
+ * watch is 192dp across, so 96dp of radius, and 88dp once the arc has taken its
+ * 6dp off the edge and a margin has taken 2dp more.
+ *
+ * At that size the stack is 41 + 2 + 26 + 14 + 8 + 48 = 139dp tall, centred, so
+ * nothing sits further than 70dp above or below the middle. Two constraints do
+ * the work:
+ *
+ *  - the car, 84dp wide with its top edge 70dp up, needs
+ *    sqrt(42² + 70²) = 82dp of radius;
+ *  - the outer circles, 48dp across with their centres 54dp out and 45dp down,
+ *    reach sqrt(54² + 45²) + 24 = 95dp.
+ *
+ * The second is the one with no slack, and it is why Climate is a circle in
+ * that row and not a labelled pill below it: a pill wide enough to read
+ * "Climate" puts its bottom corners past 105dp. Everything here scales up
+ * together on a bigger watch - see Metrics - so the same proportions hold.
+ *
+ * REFERENCE_RADIUS is that 95dp reach, not the radius of any particular watch.
+ * Scaling against anything smaller is what put the outer buttons through the
+ * arc on a 46mm face. On a true 40mm watch the layout runs about 6dp past the
+ * usable radius at those two corners, because the scale does not go below 1:
+ * shrinking further would take the buttons under the 48dp touch minimum, and a
+ * control you cannot reliably hit is worse than one that grazes the bezel.
+ */
+private const val REFERENCE_RADIUS = 95f
+
+/** Past this the car stops being a detail of the tile and becomes the tile. */
+private const val MAX_SCALE = 1.3f
+
+private const val CAR_WIDTH = 84f
+
+/** The render is 875x429, so the height follows from the width. */
+private const val CAR_ASPECT = 429f / 875f
+
+private const val CIRCLE_SIZE = 48f
+private const val CIRCLE_GAP = 6f
+private const val ICON_SIZE = 22f
+private const val ARC_THICKNESS = 6f
+private const val EDGE_MARGIN = 5f
+private const val FIGURE_SP = 22f
+private const val RANGE_SP = 13f
+private const val SUBTITLE_SP = 11f
+private const val GAP_AFTER_CAR = 2f
+private const val GAP_BEFORE_BUTTONS = 8f
+
+/**
+ * Everything in the layout, sized against the watch it is actually on.
+ *
+ * The design is laid out for the smallest round face worth supporting - 192dp
+ * across, 96dp of radius - and then scaled up by whatever the real screen
+ * offers. A 46mm watch is 226dp across, so hard-coding the small numbers leaves
+ * a third of the glass empty; hard-coding the large ones puts the buttons off
+ * the edge of a 40mm one. The scale is capped because past a point the car is
+ * just a poster with a lock button under it.
+ */
+private class Metrics(device: DeviceParametersBuilders.DeviceParameters) {
+
+    /**
+     * Half the shorter side, less the arc and a margin.
+     *
+     * The margin is what keeps the outer buttons visibly clear of the arc
+     * rather than tangent to it, which reads as a near miss.
+     */
+    private val radius =
+        minOf(device.screenWidthDp, device.screenHeightDp) / 2f - ARC_THICKNESS - EDGE_MARGIN
+
+    private val scale = (radius / REFERENCE_RADIUS).coerceIn(1f, MAX_SCALE)
+
+    val carWidth = CAR_WIDTH * scale
+    val carHeight = carWidth * CAR_ASPECT
+    val circle = CIRCLE_SIZE * scale
+    val circleGap = CIRCLE_GAP * scale
+    val iconSize = ICON_SIZE * scale
+    val figureSize = FIGURE_SP * scale
+    val rangeSize = RANGE_SP * scale
+    val subtitleSize = SUBTITLE_SP * scale
+    val gapAfterCar = GAP_AFTER_CAR * scale
+    val gapBeforeButtons = GAP_BEFORE_BUTTONS * scale
+}
+
 /**
  * The EV6 on the wrist.
  *
@@ -95,7 +178,11 @@ class KiaTileService : TileService() {
 
         val tile = TileBuilders.Tile.Builder()
             .setResourcesVersion(RESOURCES_VERSION)
-            .setTileTimeline(TimelineBuilders.Timeline.fromLayoutElement(buildLayout()))
+            .setTileTimeline(
+                TimelineBuilders.Timeline.fromLayoutElement(
+                    buildLayout(Metrics(requestParams.deviceConfiguration))
+                )
+            )
             .build()
 
         return ResolvableFuture.create<TileBuilders.Tile>().apply { set(tile) }
@@ -221,18 +308,18 @@ class KiaTileService : TileService() {
 
     // ── layout ──
 
-    private fun buildLayout(): LayoutElementBuilders.LayoutElement {
+    private fun buildLayout(m: Metrics): LayoutElementBuilders.LayoutElement {
         val armed = UnlockGuard.shouldFire(SystemClock.elapsedRealtime(), TileState.armedUntil)
         val status = TileState.status
         val message = TileState.message.also { TileState.message = null }
 
         val stack = LayoutElementBuilders.Column.Builder()
             .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
-            .addContent(car())
-            .addContent(vGap(2f))
-            .addContent(figures(status))
-            .addContent(subtitle(status, armed, message))
-            .addContent(vGap(8f))
+            .addContent(car(m))
+            .addContent(vGap(m.gapAfterCar))
+            .addContent(figures(m, status))
+            .addContent(subtitle(m, status, armed, message))
+            .addContent(vGap(m.gapBeforeButtons))
             .addContent(
                 LayoutElementBuilders.Row.Builder()
                     .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
@@ -240,6 +327,7 @@ class KiaTileService : TileService() {
                         // Lock recedes while unlock is armed, so exactly one
                         // target is live.
                         circleButton(
+                            m = m,
                             image = IMG_LOCK,
                             id = ID_LOCK,
                             background = if (armed) COLOR_SURFACE_2 else COLOR_ACCENT,
@@ -248,9 +336,10 @@ class KiaTileService : TileService() {
                             ring = false,
                         )
                     )
-                    .addContent(hGap(CIRCLE_GAP))
+                    .addContent(hGap(m.circleGap))
                     .addContent(
                         circleButton(
+                            m = m,
                             image = IMG_UNLOCK,
                             id = ID_UNLOCK,
                             background = if (armed) COLOR_ARMED else COLOR_SURFACE_2,
@@ -259,9 +348,10 @@ class KiaTileService : TileService() {
                             ring = armed,
                         )
                     )
-                    .addContent(hGap(CIRCLE_GAP))
+                    .addContent(hGap(m.circleGap))
                     .addContent(
                         circleButton(
+                            m = m,
                             image = IMG_CLIMATE,
                             id = ID_CLIMATE,
                             background = COLOR_SURFACE_2,
@@ -311,29 +401,34 @@ class KiaTileService : TileService() {
             )
             .build()
 
-    private fun car(): LayoutElementBuilders.LayoutElement =
+    private fun car(m: Metrics): LayoutElementBuilders.LayoutElement =
         LayoutElementBuilders.Image.Builder()
             .setResourceId(IMG_CAR)
-            .setWidth(dp(CAR_WIDTH))
-            .setHeight(dp(CAR_HEIGHT))
+            .setWidth(dp(m.carWidth))
+            .setHeight(dp(m.carHeight))
             .setContentScaleMode(LayoutElementBuilders.CONTENT_SCALE_MODE_FIT)
             .build()
 
     /** "78% · 412 km", with the charge carrying the weight. */
-    private fun figures(status: VehicleStatus?): LayoutElementBuilders.LayoutElement {
+    private fun figures(
+        m: Metrics,
+        status: VehicleStatus?,
+    ): LayoutElementBuilders.LayoutElement {
         val row = LayoutElementBuilders.Row.Builder()
             .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_BOTTOM)
             .addContent(
                 label(
                     text = status?.batteryPercent?.let { "$it%" } ?: "—",
-                    size = 22f,
+                    size = m.figureSize,
                     color = COLOR_TEXT,
                     weight = LayoutElementBuilders.FONT_WEIGHT_BOLD,
                 )
             )
 
         status?.range?.let {
-            row.addContent(label(" · $it ${status.rangeUnit ?: "km"}", 13f, COLOR_TEXT_DIM))
+            row.addContent(
+                label(" · $it ${status.rangeUnit ?: "km"}", m.rangeSize, COLOR_TEXT_DIM)
+            )
         }
 
         return row.build()
@@ -348,12 +443,13 @@ class KiaTileService : TileService() {
      * a moment ago stops being the point.
      */
     private fun subtitle(
+        m: Metrics,
         status: VehicleStatus?,
         armed: Boolean,
         message: String?,
     ): LayoutElementBuilders.LayoutElement {
         if (message != null) {
-            return label(message, 11f, if (armed) COLOR_ARMED else COLOR_TEXT_DIM)
+            return label(message, m.subtitleSize, if (armed) COLOR_ARMED else COLOR_TEXT_DIM)
         }
 
         val locked = status?.isLocked
@@ -363,7 +459,7 @@ class KiaTileService : TileService() {
                 false -> "Unlocked"
                 null -> "Lock unknown"
             },
-            size = 11f,
+            size = m.subtitleSize,
             color = if (locked == false) COLOR_ARMED else COLOR_TEXT_DIM,
         )
     }
@@ -405,6 +501,7 @@ class KiaTileService : TileService() {
             .build()
 
     private fun circleButton(
+        m: Metrics,
         image: String,
         id: String,
         background: Int,
@@ -418,7 +515,7 @@ class KiaTileService : TileService() {
                     .setColor(argb(background))
                     .setCorner(
                         ModifiersBuilders.Corner.Builder()
-                            .setRadius(dp(CIRCLE_SIZE / 2f))
+                            .setRadius(dp(m.circle / 2f))
                             .build()
                     )
                     .build()
@@ -443,10 +540,10 @@ class KiaTileService : TileService() {
         }
 
         return LayoutElementBuilders.Box.Builder()
-            .setWidth(dp(CIRCLE_SIZE))
-            .setHeight(dp(CIRCLE_SIZE))
+            .setWidth(dp(m.circle))
+            .setHeight(dp(m.circle))
             .setModifiers(modifiers.build())
-            .addContent(icon(image, ICON_SIZE, content))
+            .addContent(icon(image, m.iconSize, content))
             .build()
     }
 
@@ -474,27 +571,6 @@ class KiaTileService : TileService() {
         const val ID_UNLOCK = "unlock"
         const val ID_CLIMATE = "climate"
 
-        // Geometry, against a 40mm watch: 192dp across, so 96dp of radius, and
-        // call it 95dp once the arc has taken its 6dp off the edge.
-        //
-        // The stack is 41 + 2 + 26 + 14 + 8 + 48 = 139dp tall, centred, so
-        // nothing is further than 70dp above or below the middle. The two
-        // constraints that actually bite:
-        //
-        //  - the car, 84dp wide with its top edge 70dp up, needs
-        //    sqrt(42² + 70²) = 82dp of radius;
-        //  - the outer circles, 48dp across with their centres 54dp out and
-        //    45dp down, reach sqrt(54² + 45²) + 24 = 95dp.
-        //
-        // The second is the one with no slack left, which is why Climate is a
-        // circle in that row and not a pill below it: a pill wide enough to
-        // read "Climate" puts its bottom corners past 105dp.
-        const val CAR_WIDTH = 84f
-        const val CAR_HEIGHT = 41f
-        const val CIRCLE_SIZE = 48f
-        const val CIRCLE_GAP = 6f
-        const val ICON_SIZE = 22f
-        const val ARC_THICKNESS = 6f
 
         // Shared with the phone app and widget via :core, so the surfaces match.
         val COLOR_ACCENT = KiaColors.ACCENT.toInt()
