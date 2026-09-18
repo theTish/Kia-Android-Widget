@@ -94,6 +94,10 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
         val result = withContext(Dispatchers.IO) { KiaApi.status(KiaSettings.load(applicationContext)) }
         val status = result.status
 
+        // The geofence is drawn around wherever the car last said it was, so
+        // every refresh is a chance to move it with the car.
+        Geofences.sync(applicationContext, status)
+
         setState { prefs ->
             prefs[Keys.busy] = false
             if (result.ok && status != null) {

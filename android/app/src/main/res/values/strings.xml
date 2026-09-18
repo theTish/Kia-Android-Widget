@@ -101,4 +101,32 @@
     <string name="save">Save</string>
     <string name="settings_saved">Saved</string>
     <string name="settings_footnote">The watch tile is a separate install on a separate device, so it keeps whatever was compiled into it and is not affected by these settings.</string>
+
+    <!-- Auto-lock -->
+    <string name="geofence_title">Auto-lock</string>
+    <string name="geofence_channel">Auto-lock</string>
+    <string name="geofence_explainer">Locks the car when you have walked away from it. The ring is drawn around where the car itself says it parked, not around your phone, so it works the same on the drive and at the far end of a car park.</string>
+    <string name="geofence_off">Off</string>
+    <string name="geofence_shadow">Shadow</string>
+    <string name="geofence_armed">Armed</string>
+    <string name="geofence_note_off">Not running.</string>
+    <string name="geofence_note_shadow">Deciding and writing it down. The car is never touched — leave it here for a couple of weeks and read the log before arming it.</string>
+    <string name="geofence_note_armed">Will lock the car on its own.</string>
+    <string name="geofence_radius">Ring radius</string>
+    <string name="geofence_radius_value">%1$d m from where the car parked</string>
+    <string name="geofence_radius_smaller">Smaller ring</string>
+    <string name="geofence_radius_bigger">Bigger ring</string>
+    <string name="geofence_needs_location">Location permission is not granted, so nothing will run.</string>
+    <string name="geofence_needs_background">Background location is not granted. Android only allows that from Settings — until then this can only run while the app is open, which is not when you walk away from the car.</string>
+    <string name="geofence_log">Decisions</string>
+    <string name="geofence_clear">Clear</string>
+    <string name="geofence_empty">Nothing yet. Entries appear when you leave the ring — plain \"still inside\" checks are not recorded.</string>
+    <string name="geofence_entry_when">%1$s · %2$s</string>
+    <string name="geofence_entry_sent">Lock sent to the car</string>
+    <string name="geofence_locked_title">EV6 locked</string>
+    <string name="geofence_locked_text">Locked automatically — you were %1$d m away</string>
+    <string name="label_geofence">Auto-lock</string>
+    <string name="geofence_summary_off">Off</string>
+    <string name="geofence_summary_shadow">Shadow — deciding, not acting</string>
+    <string name="geofence_summary_armed">Armed — will lock the car</string>
 </resources>

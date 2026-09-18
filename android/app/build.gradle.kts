@@ -36,4 +36,9 @@ dependencies {
     // Widget taps run here, not in the Glance ActionCallback: a
     // BroadcastReceiver is cut off long before a cold car answers.
     implementation("androidx.work:work-runtime-ktx:2.11.2")
+
+    // The geofence. Play Services rather than a foreground service holding GPS
+    // all day: it wakes us on the way out of the ring and sleeps otherwise.
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("androidx.core:core-ktx:1.15.0")
 }

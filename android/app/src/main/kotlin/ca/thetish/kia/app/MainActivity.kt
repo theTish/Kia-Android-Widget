@@ -3,7 +3,6 @@ package ca.thetish.kia.app
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Typeface
-import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +16,7 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.net.toUri
 import ca.thetish.kia.core.ApiResult
 import ca.thetish.kia.core.KiaApi
 import ca.thetish.kia.core.KiaSettings
@@ -113,7 +113,7 @@ class MainActivity : Activity() {
             val lat = s.latitude ?: return@setOnClickListener
             val lon = s.longitude ?: return@setOnClickListener
             // A q label so the pin is named rather than a bare point.
-            val uri = Uri.parse("geo:$lat,$lon?q=$lat,$lon(EV6)")
+            val uri = "geo:$lat,$lon?q=$lat,$lon(EV6)".toUri()
             runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
                 .onFailure { status.text = getString(R.string.no_map_app) }
         }
@@ -180,6 +180,7 @@ class MainActivity : Activity() {
                     latest = s
                     render(s)
                     status.text = getString(R.string.updated_at, shortTime(s.lastUpdated))
+                    Geofences.sync(this, s)
                 } else {
                     status.text = getString(R.string.test_failed, outcome.message)
                 }

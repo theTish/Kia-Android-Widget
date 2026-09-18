@@ -1,6 +1,7 @@
 package ca.thetish.kia.app
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -14,6 +15,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.glance.appwidget.updateAll
+import ca.thetish.kia.core.GeofenceMode
 import ca.thetish.kia.core.KiaApi
 import ca.thetish.kia.core.KiaConfig
 import ca.thetish.kia.core.KiaSettings
@@ -78,6 +80,10 @@ class SettingsActivity : Activity() {
         secret.setText(current.secret)
         presets.select(current.climatePreset)
         backgrounds.select(KiaSettings.widgetBackground(this))
+
+        findViewById<View>(R.id.geofence).setOnClickListener {
+            startActivity(Intent(this, GeofenceActivity::class.java))
+        }
 
         reveal.setOnClickListener { toggleReveal() }
         findViewById<ImageButton>(R.id.back).setOnClickListener { finish() }
@@ -199,6 +205,19 @@ class SettingsActivity : Activity() {
 
         Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
         finish()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Read on the way back rather than at create: the mode is changed on
+        // the screen this one launches.
+        findViewById<TextView>(R.id.geofence_summary).setText(
+            when (KiaSettings.geofenceMode(this)) {
+                GeofenceMode.OFF -> R.string.geofence_summary_off
+                GeofenceMode.SHADOW -> R.string.geofence_summary_shadow
+                GeofenceMode.ARMED -> R.string.geofence_summary_armed
+            }
+        )
     }
 
     override fun onDestroy() {

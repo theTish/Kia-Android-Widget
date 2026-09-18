@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Auto-lock. The mode picker at the top, then the log - which is the part
+    that earns the mode being moved off Shadow, so it gets the room.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingTop="20dp"
+        android:paddingEnd="16dp">
+
+        <ImageButton
+            android:id="@+id/back"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/icon_button"
+            android:contentDescription="@string/back"
+            android:scaleType="center"
+            android:src="@drawable/ic_back"
+            android:tint="@color/text" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:fontFamily="@font/chakra_petch_semibold"
+            android:letterSpacing="0.04"
+            android:text="@string/geofence_title"
+            android:textColor="@color/text"
+            android:textSize="22sp" />
+
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingStart="16dp"
+        android:paddingTop="20dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="24dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:layout_marginBottom="18dp"
+                android:lineSpacingExtra="4dp"
+                android:text="@string/geofence_explainer"
+                android:textColor="@color/text_dim"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:id="@+id/mode_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/segment_group"
+                android:padding="4dp">
+
+                <TextView
+                    android:id="@+id/mode_off"
+                    style="@style/Segment"
+                    android:text="@string/geofence_off" />
+
+                <TextView
+                    android:id="@+id/mode_shadow"
+                    style="@style/Segment"
+                    android:text="@string/geofence_shadow" />
+
+                <TextView
+                    android:id="@+id/mode_armed"
+                    style="@style/Segment"
+                    android:text="@string/geofence_armed" />
+
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/mode_note"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginTop="10dp"
+                android:layout_marginEnd="4dp"
+                android:lineSpacingExtra="3dp"
+                android:textSize="13sp"
+                tools:text="Deciding and recording. The car is never touched." />
+
+            <!-- Ring size -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="22dp"
+                android:background="@drawable/card"
+                android:gravity="center_vertical"
+                android:paddingStart="18dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="10dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="@font/manrope_semibold"
+                        android:text="@string/geofence_radius"
+                        android:textColor="@color/text"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:id="@+id/radius_value"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textColor="@color/text_dim"
+                        android:textSize="13sp"
+                        tools:text="150 m from where the car parked" />
+
+                </LinearLayout>
+
+                <ImageButton
+                    android:id="@+id/radius_down"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:background="@drawable/icon_button"
+                    android:contentDescription="@string/geofence_radius_smaller"
+                    android:scaleType="center"
+                    android:src="@drawable/ic_minus"
+                    android:tint="@color/text" />
+
+                <ImageButton
+                    android:id="@+id/radius_up"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:background="@drawable/icon_button"
+                    android:contentDescription="@string/geofence_radius_bigger"
+                    android:scaleType="center"
+                    android:src="@drawable/ic_plus"
+                    android:tint="@color/text" />
+
+            </LinearLayout>
+
+            <!-- Anything standing in the way -->
+            <TextView
+                android:id="@+id/warning"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/card_attention"
+                android:lineSpacingExtra="3dp"
+                android:padding="16dp"
+                android:textColor="@color/armed"
+                android:textSize="14sp"
+                android:visibility="gone"
+                tools:text="Background location is off, so this only runs while the app is open."
+                tools:visibility="visible" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="26dp"
+                android:gravity="center_vertical">
+
+                <TextView
+                    style="@style/CardLabel"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:text="@string/geofence_log" />
+
+                <TextView
+                    android:id="@+id/clear"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:background="@drawable/pill_outline"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:text="@string/geofence_clear"
+                    android:textColor="@color/text_dim"
+                    android:textSize="14sp" />
+
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/empty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="@string/geofence_empty"
+                android:textColor="@color/text_muted"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:id="@+id/log"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/card"
+                android:orientation="vertical"
+                android:paddingStart="18dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="18dp"
+                android:paddingBottom="4dp" />
+
+        </LinearLayout>
+    </ScrollView>
+
+</LinearLayout>

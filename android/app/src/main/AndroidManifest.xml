@@ -4,6 +4,15 @@
     <!-- INTERNET and ACCESS_NETWORK_STATE come from :core, which owns the
          networking, and merge in from its manifest. -->
 
+    <!-- The geofence. Background location is the one that matters: without it
+         the ring only fires while the app is open, which is never the moment
+         you walk away from the car. All three are requested at runtime, and
+         the feature is off until they are granted. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -28,6 +37,17 @@
             android:name=".SettingsActivity"
             android:exported="false"
             android:label="@string/settings_title" />
+
+        <!-- Play Services delivers exits here. Not exported: the only sender
+             is the PendingIntent this app handed it. -->
+        <receiver
+            android:name=".GeofenceReceiver"
+            android:exported="false" />
+
+        <activity
+            android:name=".GeofenceActivity"
+            android:exported="false"
+            android:label="@string/geofence_title" />
 
         <receiver
             android:name=".KiaWidgetReceiver"

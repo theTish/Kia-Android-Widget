@@ -47,3 +47,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
+
+dependencies {
+    // The geofence decides whether to lock a car on its own. Its rules are
+    // plain Kotlin precisely so they can be tested without a device.
+    testImplementation("junit:junit:4.13.2")
+}

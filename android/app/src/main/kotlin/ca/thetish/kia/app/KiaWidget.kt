@@ -2,6 +2,7 @@ package ca.thetish.kia.app
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.core.graphics.createBitmap
 import android.graphics.Canvas
 import android.graphics.RectF
 import android.os.SystemClock
@@ -392,7 +393,7 @@ class KiaWidget : GlanceAppWidget() {
         fun batteryBar(percent: Int?, limitPercent: Int?, skin: Skin): Bitmap {
             val overhang = BAR_BITMAP_BAR_HEIGHT * BatteryBar.TICK_OVERHANG
             val height = (BAR_BITMAP_BAR_HEIGHT + overhang * 2).toInt()
-            val bitmap = Bitmap.createBitmap(BAR_BITMAP_WIDTH, height, Bitmap.Config.ARGB_8888)
+            val bitmap = createBitmap(BAR_BITMAP_WIDTH, height)
 
             BatteryBar().draw(
                 canvas = Canvas(bitmap),
