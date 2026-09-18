@@ -18,7 +18,7 @@ Replace `KiaColors.kt` + `core/res/values/colors.xml` values (keep them in step,
 | text | `#F3F5F0` | primary text |
 | text_dim | `#A3ABB0` | labels, secondary |
 | text_muted | `#7C858B` | "Not reported" |
-| accent | `#D4F53C` | GT neon: battery bar, charging, primary Lock on phone/watch |
+| accent | `#CEDE27` | GT lime, sampled from the GT drive-mode button on the steering wheel. Flat fill, no gradients. Uses: battery bars, charging state, primary Lock on phone/watch, Save, watch battery arc |
 | accent_ink | `#0B0D05` | text/icons on accent |
 | armed | `#FFB547` | unlock-confirm state, warnings |
 | armed_bg / armed_line | `#211808` / `#4A340F` | "Needs attention" card |

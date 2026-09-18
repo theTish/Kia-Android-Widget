@@ -31,9 +31,12 @@ object KiaColors {
     const val TEXT_DIM = 0xFFA3ABB0L
     const val TEXT_MUTED = 0xFF7C858BL
 
-    // GT neon. Reserved for charge and for the one primary action on a screen;
-    // spending it on anything else is what would make it stop meaning "go".
-    const val ACCENT = 0xFFD4F53CL
+    // GT lime, sampled from the drive-mode button on the steering wheel - which
+    // is why it is this exact value and not a tidier one. Reserved for charge
+    // and for the one primary action on a screen; spending it on anything else
+    // is what would make it stop meaning "go". Flat fill, never a gradient: the
+    // glow under the car on the home screen is a light effect, not a fill.
+    const val ACCENT = 0xFFCEDE27L
     const val ACCENT_INK = 0xFF0B0D05L
 
     // Amber is only ever "this needs your attention": an armed unlock, a

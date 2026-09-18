@@ -11,7 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&amp;family=Manrope:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
 <style>
 body{margin:0;background:#000;font-family:Manrope,'Segoe UI',system-ui,sans-serif;color:#F3F5F0}
-a{color:#D4F53C}a:hover{color:#E6FF7A}
+a{color:#CEDE27}a:hover{color:#DDE868}
 button{font-family:inherit}
 </style>
 </helmet>
@@ -26,7 +26,7 @@ button{font-family:inherit}
 <div style="display: flex; align-items: center; gap: 6px;">
 <div style="display: flex; align-items: baseline; font-family: 'Chakra Petch', 'Segoe UI', sans-serif; line-height: 1;"><span style="font-size: 44px; font-weight: 600;">{{s.pct}}</span><span style="font-size: 20px; font-weight: 600; color: {{dim}};">%</span></div>
 <sc-if value="{{charging}}" hint-placeholder-val="{{ false }}">
-<svg aria-label="Charging" width="22" height="22" viewBox="0 0 24 24" fill="#D4F53C" stroke="#D4F53C" stroke-width="1.5" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"></path></svg>
+<svg aria-label="Charging" width="22" height="22" viewBox="0 0 24 24" fill="#CEDE27" stroke="#CEDE27" stroke-width="1.5" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"></path></svg>
 </sc-if>
 <sc-if value="{{plugged}}" hint-placeholder-val="{{ false }}">
 <svg aria-label="Plugged in" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F3F5F0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5"></path><path d="M6 8h12v3a6 6 0 0 1-12 0z"></path><path d="M12 17v4"></path></svg>
@@ -34,12 +34,12 @@ button{font-family:inherit}
 </div>
 <div style="font-size: 13px; color: {{dim}};"><span style="color: #F3F5F0; font-weight: 600;">{{s.range}} km</span> · Locked</div>
 <sc-if value="{{charging}}" hint-placeholder-val="{{ false }}">
-<div style="font-size: 13px; font-weight: 600; color: #D4F53C;">Charging · 1 h 05 m left</div>
+<div style="font-size: 13px; font-weight: 600; color: #CEDE27;">Charging · 1 h 05 m left</div>
 </sc-if>
 <sc-if value="{{plugged}}" hint-placeholder-val="{{ false }}">
 <div style="font-size: 13px; font-weight: 600; color: #F3F5F0;">Plugged in · not charging</div>
 </sc-if>
-<div style="position: relative; height: 4px; margin-top: 6px; border-radius: 2px; background: {{track}};"><div style="position: absolute; left: 0; top: 0; bottom: 0; width: {{s.width}}; border-radius: 2px; background: #D4F53C;"></div><div style="position: absolute; left: 80%; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: rgba(255,255,255,0.85);"></div></div>
+<div style="position: relative; height: 4px; margin-top: 6px; border-radius: 2px; background: {{track}};"><div style="position: absolute; left: 0; top: 0; bottom: 0; width: {{s.width}}; border-radius: 2px; background: #CEDE27;"></div><div style="position: absolute; left: 80%; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: rgba(255,255,255,0.85);"></div></div>
 </div>
 </div>
 <div style="position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px;">

@@ -12,7 +12,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&amp;family=Manrope:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
 <style>
 body{margin:0;background:#000;font-family:Manrope,'Segoe UI',system-ui,sans-serif;color:#F3F5F0}
-a{color:#D4F53C}a:hover{color:#E6FF7A}
+a{color:#CEDE27}a:hover{color:#DDE868}
 button{font-family:inherit;cursor:pointer}
 </style>
 </helmet>
@@ -30,7 +30,7 @@ button{font-family:inherit;cursor:pointer}
 </header>
 
 <section style="position: relative; height: 208px; margin-top: 4px; display: flex; align-items: flex-end; justify-content: center;">
-<div style="position: absolute; left: 30px; right: 30px; bottom: 6px; height: 44px; border-radius: 50%; background: radial-gradient(closest-side, rgba(212,245,60,0.22), rgba(212,245,60,0));"></div>
+<div style="position: absolute; left: 30px; right: 30px; bottom: 6px; height: 44px; border-radius: 50%; background: radial-gradient(closest-side, {{glow}}, rgba(0,0,0,0));"></div>
 <div style="position: absolute; left: 24px; right: 24px; bottom: 16px; height: 1px; background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.18), rgba(255,255,255,0));"></div>
 <img src="../design-assets/ev6gt-front34.png" alt="White 2024 Kia EV6 GT" style="position: relative; width: 360px; height: auto; margin-bottom: 0;">
 </section>
@@ -105,14 +105,16 @@ button{font-family:inherit;cursor:pointer}
 </section>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#D4F53C","options":["#D4F53C","#5EE6C8","#F3F5F0"]},"$preview":{"width":390,"height":1320}}'>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#CEDE27","options":["#CEDE27","#D3DA50","#D4F53C"]},"$preview":{"width":390,"height":1320}}'>
 class Component extends DCLogic {
   constructor(props) { super(props); this.state = { armed: false }; }
   componentWillUnmount() { clearTimeout(this.t); }
   renderVals() {
     const armed = this.state.armed;
+    const accent = this.props.accent ?? '#CEDE27';
     return {
-      accent: this.props.accent ?? '#D4F53C',
+      accent,
+      glow: accent + '38',
       armUnlock: () => {
         clearTimeout(this.t);
         if (armed) { this.setState({ armed: false }); return; }

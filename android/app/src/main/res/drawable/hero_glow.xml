@@ -14,7 +14,7 @@
         android:centerX="0.5"
         android:centerY="0.5"
         android:gradientRadius="170dp"
-        android:startColor="#38D4F53C"
-        android:endColor="#00D4F53C"
+        android:startColor="#38CEDE27"
+        android:endColor="#00CEDE27"
         android:type="radial" />
 </shape>
