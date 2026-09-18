@@ -16,4 +16,6 @@
         are cards on a wallpaper and use the lighter tone so their edges read.
     -->
     <color name="background">#FF000000</color>
+    <color name="armed_text">#FFFFB74D</color>
+    <color name="neutral">#FF263238</color>
 </resources>

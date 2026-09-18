@@ -1,0 +1,160 @@
+package ca.thetish.kia.core
+
+import org.json.JSONObject
+
+/**
+ * Everything from /status that a client displays.
+ *
+ * Wider than the widget needs on purpose: the phone app is where the long tail
+ * lives, because a widget showing tyre pressure warnings would be unreadable.
+ *
+ * Almost every field is nullable, and that is not defensive padding - the car
+ * genuinely reports different subsets at different times. Windows come back
+ * null on this EV6 always; EV battery and range go null whenever Kia's cached
+ * view is stale. Anything unknown must render as unknown, never as zero or as
+ * a cheerful default.
+ */
+data class VehicleStatus(
+    // Charge
+    val batteryPercent: Int?,
+    val battery12v: Int?,
+    val isCharging: Boolean,
+    val pluggedIn: Boolean,
+    val plugType: String?,
+    val chargingEta: String?,
+    val chargeRemainingText: String?,
+    val chargeLimitAc: Int?,
+    val chargeLimitDc: Int?,
+    val batteryPreconditioning: Boolean?,
+
+    // Distance
+    val range: Int?,
+    val rangeUnit: String?,
+    val odometer: Double?,
+    val odometerUnit: String?,
+
+    // Security
+    val isLocked: Boolean?,
+    val engineRunning: Boolean?,
+    /** Human names of anything standing open, empty when all shut. */
+    val openings: List<String>,
+    /** True only if the car actually reported window state; this EV6 never does. */
+    val windowsReported: Boolean,
+
+    // Climate
+    val climateOn: Boolean?,
+    val setTemperature: Double?,
+    val defrostOn: Boolean?,
+    val steeringWheelHeaterOn: Boolean?,
+    val rearWindowHeaterOn: Boolean?,
+
+    // Care
+    /** Human names of anything warning, empty when nothing is. */
+    val warnings: List<String>,
+    val serviceDistanceToNext: Double?,
+
+    val latitude: Double?,
+    val longitude: Double?,
+    val lastUpdated: String?,
+) {
+    val hasEvData: Boolean get() = batteryPercent != null
+
+    companion object {
+        private val OPENING_LABELS = mapOf(
+            "front_left" to "front left",
+            "front_right" to "front right",
+            "back_left" to "rear left",
+            "back_right" to "rear right",
+            "trunk" to "boot",
+            "hood" to "bonnet",
+            "sunroof" to "sunroof",
+        )
+
+        private val WARNING_LABELS = mapOf(
+            "tire_pressure_front_left" to "Tyre: front left",
+            "tire_pressure_front_right" to "Tyre: front right",
+            "tire_pressure_rear_left" to "Tyre: rear left",
+            "tire_pressure_rear_right" to "Tyre: rear right",
+            "washer_fluid_low" to "Washer fluid low",
+            "brake_fluid_low" to "Brake fluid low",
+        )
+
+        fun parse(json: JSONObject): VehicleStatus {
+            val range = json.optJSONObject("range")
+            val odo = json.optJSONObject("odometer")
+            val limits = json.optJSONObject("charge_limits")
+            val climate = json.optJSONObject("climate")
+            val warnings = json.optJSONObject("warnings")
+            val service = json.optJSONObject("service")
+            val location = json.optJSONObject("location")
+            val doors = json.optJSONObject("doors")
+            val windows = json.optJSONObject("windows")
+
+            val openings = buildList {
+                addAll(namesOfTrue(doors))
+                addAll(namesOfTrue(windows).map { "$it window" })
+            }
+
+            return VehicleStatus(
+                batteryPercent = json.intOrNull("battery_percentage"),
+                battery12v = json.intOrNull("battery_12v"),
+                isCharging = json.optBoolean("is_charging", false),
+                pluggedIn = json.optBoolean("plugged_in", false),
+                plugType = json.stringOrNull("plug_type"),
+                chargingEta = json.stringOrNull("charging_eta"),
+                chargeRemainingText = json.stringOrNull("charging_duration_formatted"),
+                chargeLimitAc = limits?.intOrNull("ac"),
+                chargeLimitDc = limits?.intOrNull("dc"),
+                batteryPreconditioning = json.boolOrNull("battery_preconditioning"),
+
+                range = range?.doubleOrNull("ev")?.toInt(),
+                rangeUnit = range?.stringOrNull("unit"),
+                odometer = odo?.doubleOrNull("value"),
+                odometerUnit = odo?.stringOrNull("unit"),
+
+                isLocked = json.boolOrNull("is_locked"),
+                engineRunning = json.boolOrNull("engine_running"),
+                openings = openings,
+                windowsReported = windows?.keys()?.asSequence()
+                    ?.any { !windows.isNull(it) } ?: false,
+
+                climateOn = climate?.boolOrNull("air_control_on"),
+                setTemperature = climate?.doubleOrNull("set_temperature"),
+                defrostOn = climate?.boolOrNull("defrost_on"),
+                steeringWheelHeaterOn = climate?.boolOrNull("steering_wheel_heater_on"),
+                rearWindowHeaterOn = climate?.boolOrNull("rear_window_heater_on"),
+
+                warnings = WARNING_LABELS.filter { (key, _) ->
+                    warnings?.boolOrNull(key) == true
+                }.values.toList(),
+                serviceDistanceToNext = service?.doubleOrNull("distance_to_next"),
+
+                latitude = location?.doubleOrNull("latitude"),
+                longitude = location?.doubleOrNull("longitude"),
+                lastUpdated = json.stringOrNull("last_updated_at"),
+            )
+        }
+
+        private fun namesOfTrue(obj: JSONObject?): List<String> {
+            if (obj == null) return emptyList()
+            return obj.keys().asSequence()
+                .filter { !obj.isNull(it) && obj.optBoolean(it) }
+                .mapNotNull { OPENING_LABELS[it] }
+                .toList()
+        }
+
+        // JSON null and absent both mean "unknown", so both come back as null
+        // rather than as optInt's 0 or optBoolean's false.
+        private fun JSONObject.intOrNull(key: String): Int? =
+            if (isNull(key)) null else optInt(key)
+
+        private fun JSONObject.doubleOrNull(key: String): Double? =
+            if (isNull(key)) null else optDouble(key).takeIf { !it.isNaN() }
+
+        private fun JSONObject.boolOrNull(key: String): Boolean? =
+            if (isNull(key)) null else optBoolean(key)
+
+        private fun JSONObject.stringOrNull(key: String): String? =
+            if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
+    }
+}

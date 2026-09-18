@@ -1,6 +1,7 @@
 import os
 import copy
 import logging
+import threading
 from functools import wraps
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -95,6 +96,12 @@ if PIN:
 # ── Global state ──
 vehicle_manager = None
 VEHICLE_ID = None
+
+# On a long-lived host the manager, its token and the vehicle list live for the
+# life of the process, which is the whole point of running there - but that also
+# means concurrent requests share them. This serialises initialisation so two
+# requests arriving together cannot each start a login.
+_init_lock = threading.RLock()
 # Only a timestamp: the state itself lives on the VehicleManager's vehicles.
 vehicle_state_cache = {"last_update": None}
 rate_limit_store = {}
@@ -224,8 +231,21 @@ def init_vehicle_manager():
 
     # VEHICLE_ID is only ever set alongside a live manager, and it is the thing
     # every caller actually needs, so it alone decides whether we are ready.
+    # Checked before taking the lock so the warm path stays free.
     if VEHICLE_ID is not None:
         return True
+
+    with _init_lock:
+        # Another thread may have finished while we waited.
+        if VEHICLE_ID is not None:
+            return True
+
+        return _init_vehicle_manager_locked()
+
+
+def _init_vehicle_manager_locked():
+    """The real initialisation. Only ever called holding _init_lock."""
+    global vehicle_manager, VEHICLE_ID
 
     # Check credentials first
     if USERNAME is None or PASSWORD is None or PIN is None:
@@ -670,6 +690,20 @@ def vehicle_status():
     """Get current vehicle status."""
 
     refresh_token_if_needed()
+
+    # Kia serves a cached view of the car, and that cache sometimes comes back
+    # with no EV data at all - no battery, no range - while still reporting the
+    # 12V. Rendering that as 0% would read as a flat battery rather than "not
+    # reported", so allow a direct poll of the car instead.
+    #
+    # Not the default: a force refresh wakes the car's modem and costs a little
+    # 12V, which is why the cheap cached read is still what normal calls use.
+    force = bool((request.get_json(silent=True) or {}).get("force"))
+    if force:
+        logger.info("Forcing a live refresh from the car...")
+        vehicle_manager.force_refresh_vehicle_state(VEHICLE_ID)
+        vehicle_state_cache["last_update"] = None
+
     vehicle = get_cached_vehicle_state()
 
     pct = vehicle.ev_battery_percentage
@@ -1201,6 +1235,41 @@ def debug_vehicle():
 
 
 # ── Error Handlers ──
+# ── Token keepalive (long-lived hosts only) ──
+# Kia's access token expires, and on Canada a refresh is a full re-login. The
+# library exposes a cheap "get vehicle list" call for exactly this: hitting it
+# every few minutes keeps the token alive, so a box that stays up logs in about
+# once a day instead of once per request.
+#
+# Off unless KIA_KEEPALIVE_SECONDS is set, because it is meaningless on a
+# serverless deployment where the process dies between requests.
+def _keepalive_loop(interval: int):
+    import time
+
+    while True:
+        time.sleep(interval)
+        try:
+            if vehicle_manager is None or vehicle_manager.token is None:
+                continue
+            with _init_lock:
+                alive = vehicle_manager.api.test_token(vehicle_manager.token)
+                if not alive:
+                    logger.info("Keepalive: token stale, refreshing...")
+                    vehicle_manager.check_and_refresh_token()
+        except Exception as e:
+            # Never let this kill the thread - the next tick may well succeed,
+            # and a request can always re-initialise on its own.
+            logger.warning(f"Keepalive tick failed: {e}")
+
+
+_KEEPALIVE_SECONDS = int(os.environ.get("KIA_KEEPALIVE_SECONDS", "0") or 0)
+if _KEEPALIVE_SECONDS > 0:
+    logger.info(f"Starting token keepalive every {_KEEPALIVE_SECONDS}s")
+    threading.Thread(
+        target=_keepalive_loop, args=(_KEEPALIVE_SECONDS,), daemon=True
+    ).start()
+
+
 @app.errorhandler(404)
 def not_found(e):
     """Handle 404 errors."""

@@ -5,6 +5,7 @@ import androidx.concurrent.futures.ResolvableFuture
 import ca.thetish.kia.core.ApiResult
 import ca.thetish.kia.core.BuildConfig
 import ca.thetish.kia.core.KiaApi
+import ca.thetish.kia.core.KiaConfig
 import ca.thetish.kia.core.R as CoreR
 import ca.thetish.kia.core.KiaColors
 import ca.thetish.kia.core.UnlockGuard
@@ -99,12 +100,12 @@ class KiaTileService : TileService() {
         when (clickableId) {
             ID_LOCK -> {
                 TileState.armedUntil = 0L
-                send("Locking") { KiaApi.lock() }
+                send("Locking") { KiaApi.lock(CONFIG) }
             }
 
             ID_CLIMATE -> {
                 TileState.armedUntil = 0L
-                send("Climate") { KiaApi.startClimate(BuildConfig.KIA_CLIMATE_PRESET) }
+                send("Climate") { KiaApi.startClimate(CONFIG) }
             }
 
             // Unlock is the one action here you cannot take back in a car park,
@@ -113,7 +114,7 @@ class KiaTileService : TileService() {
                 val now = SystemClock.elapsedRealtime()
                 if (UnlockGuard.shouldFire(now, TileState.armedUntil)) {
                     TileState.armedUntil = 0L
-                    send("Unlocking") { KiaApi.unlock() }
+                    send("Unlocking") { KiaApi.unlock(CONFIG) }
                 } else {
                     TileState.armedUntil = UnlockGuard.armUntil(now)
                     TileState.message = "Tap again to unlock"
@@ -319,6 +320,11 @@ class KiaTileService : TileService() {
             .build()
 
     private companion object {
+        // The watch is a separate device with its own storage, so the phone's
+        // Settings screen cannot reach it. Build-time config it is - see
+        // local.properties.example. Changing hosts means rebuilding the tile.
+        val CONFIG = KiaConfig.fromBuildConfig()
+
         // Bumped whenever the drawables change, so the tile refetches them.
         const val RESOURCES_VERSION = "2"
 

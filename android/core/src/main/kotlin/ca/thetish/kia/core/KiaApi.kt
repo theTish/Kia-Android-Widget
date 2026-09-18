@@ -8,23 +8,6 @@ import java.net.URL
 /** Outcome of one command, already reduced to something short enough for a watch face. */
 data class ApiResult(val ok: Boolean, val message: String)
 
-/**
- * The slice of /status the clients actually render.
- *
- * Deliberately narrow: /status returns a great deal more (windows, warnings,
- * service intervals, climate readback), and this grows when something needs it
- * rather than carrying fields nothing reads.
- *
- * Every field is nullable because the car reports what it feels like reporting:
- * a value missing from the response is normal, not an error.
- */
-data class VehicleStatus(
-    val batteryPercent: Int?,
-    val isCharging: Boolean,
-    val isLocked: Boolean?,
-    val range: Int?,
-)
-
 /** A status read: the parsed state, or why it could not be read. */
 data class StatusResult(val ok: Boolean, val message: String, val status: VehicleStatus?)
 
@@ -41,39 +24,49 @@ object KiaApi {
 
     private val Int.isOk get() = this in 200..299
 
-    fun lock(): ApiResult = command("/lock_car", null)
+    fun lock(cfg: KiaConfig): ApiResult = command(cfg, "/lock_car", null)
 
-    fun unlock(): ApiResult = command("/unlock_car", null)
+    fun unlock(cfg: KiaConfig): ApiResult = command(cfg, "/unlock_car", null)
 
-    fun startClimate(preset: String): ApiResult =
-        command("/start_climate", JSONObject().put("preset", preset).toString())
+    fun startClimate(cfg: KiaConfig): ApiResult =
+        command(cfg, "/start_climate", JSONObject().put("preset", cfg.climatePreset).toString())
 
-    /** Reads /status and parses the bits the clients show. */
-    fun status(): StatusResult {
-        val (code, text, error) = request("/status", null)
+    /**
+     * Reads /status.
+     *
+     * Kia's cached view of the car sometimes answers with no EV data at all -
+     * no battery, no range - while still reporting the 12V. When that happens
+     * this retries once asking the API to poll the car directly, because a
+     * status screen with no battery on it is useless.
+     *
+     * Only on the empty case: a forced poll wakes the car's modem, so it is not
+     * something to do on every refresh.
+     */
+    fun status(cfg: KiaConfig): StatusResult {
+        val first = statusOnce(cfg, force = false)
+        if (first.ok && first.status?.batteryPercent == null) {
+            val forced = statusOnce(cfg, force = true)
+            if (forced.ok) return forced
+        }
+        return first
+    }
+
+    private fun statusOnce(cfg: KiaConfig, force: Boolean): StatusResult {
+        val body = if (force) JSONObject().put("force", true).toString() else null
+        val (code, text, error) = request(cfg, "/status", body)
 
         if (error != null) return StatusResult(false, error, null)
         if (!code.isOk) return StatusResult(false, field(text, "error") ?: "HTTP $code", null)
 
         return try {
-            val json = JSONObject(text)
-            StatusResult(
-                ok = true,
-                message = "Updated",
-                status = VehicleStatus(
-                    batteryPercent = json.intOrNull("battery_percentage"),
-                    isCharging = json.optBoolean("is_charging", false),
-                    isLocked = json.boolOrNull("is_locked"),
-                    range = json.optJSONObject("range")?.intOrNull("ev"),
-                ),
-            )
+            StatusResult(ok = true, message = "Updated", status = VehicleStatus.parse(JSONObject(text)))
         } catch (e: Exception) {
             StatusResult(false, e.message?.takeIf { it.isNotBlank() } ?: "Bad response", null)
         }
     }
 
-    private fun command(path: String, body: String?): ApiResult {
-        val (code, text, error) = request(path, body)
+    private fun command(cfg: KiaConfig, path: String, body: String?): ApiResult {
+        val (code, text, error) = request(cfg, path, body)
 
         if (error != null) return ApiResult(false, error)
 
@@ -86,19 +79,19 @@ object KiaApi {
     }
 
     /** One POST. Returns status code and body, or a human-readable failure. */
-    private fun request(path: String, body: String?): Triple<Int, String, String?> {
-        if (BuildConfig.KIA_SECRET.isEmpty()) {
-            return Triple(0, "", "No key in build")
+    private fun request(cfg: KiaConfig, path: String, body: String?): Triple<Int, String, String?> {
+        if (!cfg.isUsable) {
+            return Triple(0, "", "No API key set")
         }
 
         return try {
-            val conn = (URL(BuildConfig.KIA_BASE_URL + path).openConnection() as HttpURLConnection)
+            val conn = (URL(cfg.baseUrl + path).openConnection() as HttpURLConnection)
                 .apply {
                     requestMethod = "POST"
                     connectTimeout = TIMEOUT_MS
                     readTimeout = TIMEOUT_MS
                     doOutput = true
-                    setRequestProperty("Authorization", BuildConfig.KIA_SECRET)
+                    setRequestProperty("Authorization", cfg.secret)
                     setRequestProperty("Accept", "application/json")
                     setRequestProperty("Content-Type", "application/json")
                 }
@@ -122,14 +115,6 @@ object KiaApi {
     /** Pulls one string field out of a reply, for the command messages. */
     private fun field(json: String, key: String): String? =
         runCatching { JSONObject(json).stringOrNull(key) }.getOrNull()
-
-    // JSON null and absent both mean "unknown", so both come back as null here
-    // rather than as optInt's 0 or optBoolean's false.
-    private fun JSONObject.intOrNull(key: String): Int? =
-        if (isNull(key)) null else optInt(key)
-
-    private fun JSONObject.boolOrNull(key: String): Boolean? =
-        if (isNull(key)) null else optBoolean(key)
 
     private fun JSONObject.stringOrNull(key: String): String? =
         if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
