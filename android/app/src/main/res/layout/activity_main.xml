@@ -169,6 +169,7 @@
                         android:id="@+id/battery_unit"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:visibility="gone"
                         android:fontFamily="@font/chakra_petch_semibold"
                         android:includeFontPadding="false"
                         android:text="@string/percent_sign"
@@ -204,7 +205,7 @@
                     android:layout_height="16dp"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_lock"
-                    android:tint="@color/accent" />
+                    android:tint="@color/text_muted" />
 
                 <TextView
                     android:id="@+id/lock_chip_text"
@@ -212,7 +213,8 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="8dp"
                     android:fontFamily="@font/manrope_semibold"
-                    android:textColor="@color/text"
+                    android:text="@string/lock_unknown"
+                    android:textColor="@color/text_muted"
                     android:textSize="14sp"
                     tools:text="Locked" />
 
@@ -488,7 +490,7 @@
 
             <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="match_parent"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:background="@drawable/card"
                 android:orientation="vertical"
@@ -517,7 +519,7 @@
 
             <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="match_parent"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:background="@drawable/card"
                 android:orientation="vertical"

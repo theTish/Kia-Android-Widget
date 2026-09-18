@@ -16,6 +16,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
+import androidx.glance.LocalSize
 import androidx.glance.ColorFilter
 import androidx.glance.Image
 import androidx.glance.ImageProvider
@@ -24,6 +25,7 @@ import androidx.glance.action.ActionParameters
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
@@ -100,6 +102,12 @@ internal object Keys {
  */
 class KiaWidget : GlanceAppWidget() {
 
+    // Exact, so LocalSize reports the size the host actually gave us. Under the
+    // default SizeMode it reports the provider's declared minimum, and the car
+    // is sized as a share of the width - which would then be a share of a
+    // number that has nothing to do with the widget on the screen.
+    override val sizeMode = SizeMode.Exact
+
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // Read outside the composition: a SharedPreferences hit per recomposition
         // would be pointless, and this cannot change while the widget is drawing.
@@ -127,21 +135,29 @@ class KiaWidget : GlanceAppWidget() {
             modifier = GlanceModifier
                 .fillMaxSize()
                 .background(ImageProvider(skin.background), ContentScale.FillBounds)
-                .padding(16.dp),
+                .padding(14.dp),
         ) {
-            Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // The row takes the slack, so the controls stay on the bottom edge
+            // however tall the host has made the widget.
+            Row(
+                modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val carWidth = carWidth(LocalSize.current.width.value)
                 Image(
                     provider = ImageProvider(CoreR.drawable.ev6_gt),
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
-                    modifier = GlanceModifier.width(CAR_WIDTH.dp).height(CAR_HEIGHT.dp),
+                    modifier = GlanceModifier
+                        .width(carWidth.dp)
+                        .height((carWidth * CAR_ASPECT).dp),
                 )
 
                 Spacer(GlanceModifier.width(12.dp))
 
                 Column(modifier = GlanceModifier.defaultWeight()) {
                     Headline(skin, battery, charging, pluggedIn)
-                    Spacer(GlanceModifier.height(4.dp))
+                    Spacer(GlanceModifier.height(2.dp))
                     Summary(skin, range, locked)
                     StatusLine(
                         skin = skin,
@@ -151,8 +167,13 @@ class KiaWidget : GlanceAppWidget() {
                         pluggedIn = pluggedIn,
                         message = message,
                         noData = battery == null && range == null && locked == null,
+                        // On a short widget the charge state gives up its line
+                        // rather than push the bar off the bottom. An armed
+                        // unlock or a command in flight never does: those are
+                        // the line telling you what the widget is about to do.
+                        essentialOnly = LocalSize.current.height.value < COMPACT_HEIGHT,
                     )
-                    Spacer(GlanceModifier.height(6.dp))
+                    Spacer(GlanceModifier.height(5.dp))
                     Image(
                         provider = ImageProvider(
                             batteryBar(battery, prefs[Keys.chargeLimitAc], skin)
@@ -164,7 +185,7 @@ class KiaWidget : GlanceAppWidget() {
                 }
             }
 
-            Spacer(GlanceModifier.height(14.dp))
+            Spacer(GlanceModifier.height(10.dp))
 
             Row(modifier = GlanceModifier.fillMaxWidth()) {
                 // While a command is in flight every control greys out. The row
@@ -199,7 +220,7 @@ class KiaWidget : GlanceAppWidget() {
                 text = battery?.toString() ?: "—",
                 style = TextStyle(
                     color = ColorProvider(skin.text),
-                    fontSize = 32.sp,
+                    fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
@@ -240,6 +261,7 @@ class KiaWidget : GlanceAppWidget() {
             if (range != null) {
                 Text(
                     text = "$range km",
+                    maxLines = 1,
                     style = TextStyle(
                         color = ColorProvider(skin.text),
                         fontSize = 13.sp,
@@ -257,6 +279,7 @@ class KiaWidget : GlanceAppWidget() {
                     false -> "Unlocked"
                     null -> "Lock unknown"
                 },
+                maxLines = 1,
                 style = TextStyle(
                     color = ColorProvider(if (locked == false) skin.armed else skin.dim),
                     fontSize = 13.sp,
@@ -282,10 +305,12 @@ class KiaWidget : GlanceAppWidget() {
         pluggedIn: Boolean,
         message: String,
         noData: Boolean,
+        essentialOnly: Boolean,
     ) {
         val (text, color) = when {
             armed -> "Tap Unlock again to confirm" to skin.armed
             message.isNotEmpty() -> message to skin.dim
+            essentialOnly -> return
             charging -> {
                 val left = prefs[Keys.chargeRemaining]
                 (if (left != null) "Charging · $left left" else "Charging") to skin.accent
@@ -337,11 +362,29 @@ class KiaWidget : GlanceAppWidget() {
 
     private companion object {
         // 875x429 source, so the height follows from the width.
-        const val CAR_WIDTH = 150
-        const val CAR_HEIGHT = 74
+        const val CAR_ASPECT = 429f / 875f
+
+        /**
+         * How much of the card the car may take.
+         *
+         * A fixed width does not survive resizing: at 150dp on a 257dp-wide
+         * widget the right-hand column is left with 63dp, and "412 km · Locked"
+         * wraps onto three lines. A share of the width keeps the two in
+         * proportion, with a floor so the car stays recognisable and a ceiling
+         * so it stops growing once the text has all the room it needs.
+         */
+        fun carWidth(widthDp: Float): Float = (widthDp * 0.38f).coerceIn(84f, 168f)
 
         // The bar is rendered at a fixed pixel size and stretched to fit,
         // because Glance has no fractional weights to express "78% of a row".
+        /**
+         * Below this the card cannot hold every line at once.
+         *
+         * The provider declares a matching minResizeHeight, so a launcher will
+         * not normally hand us less; this is what happens if one does anyway.
+         */
+        const val COMPACT_HEIGHT = 152f
+
         const val BAR_BITMAP_WIDTH = 400
         const val BAR_BITMAP_BAR_HEIGHT = 8f
         const val BAR_VIEW_HEIGHT = 8

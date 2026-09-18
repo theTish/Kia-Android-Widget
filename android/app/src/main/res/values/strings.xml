@@ -55,6 +55,8 @@
     <string name="metric_dc_limit">DC limit</string>
     <string name="metric_12v">12V battery</string>
     <string name="service_sub">km to next service</string>
+    <string name="service_due">Due</string>
+    <string name="service_overdue">%1$s km past due</string>
     <string name="climate_temperature">%1$s°</string>
     <string name="climate_running">Running</string>
     <string name="climate_off">Off</string>

@@ -5,11 +5,18 @@
     would wake the device without refreshing anything. Status is fetched when
     Refresh is tapped and after any command succeeds.
 -->
+<!--
+    The minimums are the size the card needs, not the smallest it can be drawn:
+    the car, four lines of text and a row of 48dp controls do not fit in less,
+    and a launcher that is told they do will simply clip the bottom off.
+-->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_description"
     android:initialLayout="@layout/glance_default_loading_layout"
-    android:minWidth="180dp"
-    android:minHeight="110dp"
+    android:minWidth="250dp"
+    android:minHeight="150dp"
+    android:minResizeWidth="250dp"
+    android:minResizeHeight="150dp"
     android:previewImage="@drawable/ic_kia"
     android:resizeMode="horizontal|vertical"
     android:targetCellWidth="4"

@@ -23,7 +23,10 @@ import ca.thetish.kia.core.KiaSettings
 import ca.thetish.kia.core.UnlockGuard
 import ca.thetish.kia.core.VehicleStatus
 import ca.thetish.kia.core.R as CoreR
+import java.text.DateFormat
 import java.text.NumberFormat
+import java.time.OffsetDateTime
+import java.util.Date
 import java.util.concurrent.Executors
 
 /**
@@ -42,6 +45,9 @@ class MainActivity : Activity() {
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val numbers: NumberFormat = NumberFormat.getIntegerInstance()
+
+    /** The phone's own 12- or 24-hour preference, not ours to decide. */
+    private val timeFormat: DateFormat by lazy { android.text.format.DateFormat.getTimeFormat(this) }
 
     private lateinit var status: TextView
     private lateinit var battery: TextView
@@ -318,12 +324,7 @@ class MainActivity : Activity() {
             add(getString(R.string.climate_preset, KiaSettings.load(this@MainActivity).climatePreset))
         }.joinToString(" · ")
 
-        val service = findViewById<TextView>(R.id.service_value)
-        service.text = s.serviceDistanceToNext
-            ?.let { numbers.format(it.toInt()) }
-            ?: getString(R.string.no_value)
-        findViewById<TextView>(R.id.service_sub).visibility =
-            if (s.serviceDistanceToNext != null) View.VISIBLE else View.INVISIBLE
+        renderService(s)
 
         findViewById<TextView>(R.id.odometer).text = s.odometer
             ?.let { getString(R.string.distance_value, numbers.format(it.toInt()), s.odometerUnit ?: DEFAULT_UNIT) }
@@ -333,6 +334,40 @@ class MainActivity : Activity() {
         // The distinction matters: this EV6 never reports windows at all, and
         // "All shut" would be a claim the car never made.
         setRow(R.id.windows, s.windowsOpen.joinToString(", "), known = s.windowsReported)
+    }
+
+    /**
+     * How far until the next service.
+     *
+     * The car does not report a distance: `distance_to_next` is the odometer
+     * reading the service is booked against, and `distance_since_last` is the
+     * reading of the last one. With the odometer at 33,379 and the next service
+     * at 36,000, showing the raw field would promise another 36,000km of
+     * motoring before anything needs doing - out by a factor of fourteen.
+     */
+    private fun renderService(s: VehicleStatus) {
+        val value = findViewById<TextView>(R.id.service_value)
+        val sub = findViewById<TextView>(R.id.service_sub)
+
+        val dueAt = s.serviceDistanceToNext
+        val odometer = s.odometer
+        if (dueAt == null || odometer == null) {
+            value.text = getString(R.string.no_value)
+            sub.visibility = View.INVISIBLE
+            return
+        }
+
+        sub.visibility = View.VISIBLE
+        val remaining = (dueAt - odometer).toInt()
+        if (remaining > 0) {
+            value.text = numbers.format(remaining)
+            value.setTextColor(getColor(CoreR.color.text))
+            sub.setText(R.string.service_sub)
+        } else {
+            value.setText(R.string.service_due)
+            value.setTextColor(getColor(CoreR.color.armed))
+            sub.text = getString(R.string.service_overdue, numbers.format(-remaining))
+        }
     }
 
     /** A row of openings: the list when something is open, "All shut" when not. */
@@ -363,9 +398,23 @@ class MainActivity : Activity() {
     private fun trimDecimal(value: Double): String =
         if (value == value.toInt().toDouble()) value.toInt().toString() else value.toString()
 
-    /** "2026-09-17T22:12:06+00:00" -> "22:12". A freshness hint, not a clock. */
-    private fun shortTime(iso: String?): String =
-        iso?.substringAfter('T')?.take(5) ?: "?"
+    /**
+     * "2026-09-17T22:12:06+00:00" -> "6:12 pm", in the phone's own time.
+     *
+     * The API answers in UTC. Printing its clock face verbatim, which is what
+     * this used to do, made a reading from a minute ago look nine hours old -
+     * the one thing this line exists to tell you.
+     */
+    private fun shortTime(iso: String?): String {
+        if (iso == null) return "?"
+        return runCatching {
+            timeFormat.format(Date.from(OffsetDateTime.parse(iso).toInstant()))
+        }.getOrElse {
+            // Not every field the car fills in carries an offset. Better the
+            // raw clock face than nothing at all.
+            iso.substringAfter('T').take(5)
+        }
+    }
 
     override fun onDestroy() {
         super.onDestroy()
