@@ -2,8 +2,11 @@ package ca.thetish.kia.app
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.widget.ImageButton
@@ -105,12 +108,16 @@ class GeofenceActivity : Activity() {
     }
 
     /**
-     * Asks for location, foreground first.
+     * Asks for what a dialog can actually grant.
      *
-     * Android will not grant background location in the same breath as
-     * foreground - and from Android 11 it will not grant it from a dialog at
-     * all, only from Settings - so this asks for what it can and the screen
-     * says plainly what is still missing.
+     * Not background location, deliberately. From Android 11 that permission
+     * cannot be granted from a dialog at all: requestPermissions for it does
+     * not prompt, it throws the user out into system Settings - and lands them
+     * on the list of every app's location access rather than this one's, two
+     * Back presses from where they were. Doing that unasked, immediately after
+     * they granted the first one, reads as the app having lost its place.
+     *
+     * So the amber warning carries that trip instead, and only when tapped.
      */
     private fun requestWhatIsMissing() {
         if (!Geofences.hasLocationPermission(this)) {
@@ -124,18 +131,20 @@ class GeofenceActivity : Activity() {
             return
         }
 
-        if (!Geofences.hasBackgroundLocationPermission(this)) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                requestPermissions(
-                    arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
-                    REQUEST_BACKGROUND,
-                )
-            }
-            return
-        }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFY)
+        }
+    }
+
+    /** This app's own permission page - the nearest thing to a deep link Android offers. */
+    private fun openAppSettings() {
+        runCatching {
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", packageName, null),
+                )
+            )
         }
     }
 
@@ -201,6 +210,11 @@ class GeofenceActivity : Activity() {
         }
         warning.text = message.orEmpty()
         warning.visibility = if (message == null) View.GONE else View.VISIBLE
+
+        // Only the background-location case has somewhere useful to go.
+        val opensSettings = message != null && Geofences.hasLocationPermission(this)
+        warning.isClickable = opensSettings
+        warning.setOnClickListener(if (opensSettings) View.OnClickListener { openAppSettings() } else null)
     }
 
     private fun renderLog() {
@@ -277,7 +291,6 @@ class GeofenceActivity : Activity() {
 
     private companion object {
         const val REQUEST_FOREGROUND = 1
-        const val REQUEST_BACKGROUND = 2
         const val REQUEST_NOTIFY = 3
     }
 }

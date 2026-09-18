@@ -117,7 +117,7 @@
     <string name="geofence_radius_smaller">Smaller ring</string>
     <string name="geofence_radius_bigger">Bigger ring</string>
     <string name="geofence_needs_location">Location permission is not granted, so nothing will run.</string>
-    <string name="geofence_needs_background">Background location is not granted. Android only allows that from Settings — until then this can only run while the app is open, which is not when you walk away from the car.</string>
+    <string name="geofence_needs_background">Background location is not granted, so this can only run while the app is open — which is not when you walk away from the car. Android only allows it from Settings: tap here, then Permissions → Location → Allow all the time.</string>
     <string name="geofence_log">Decisions</string>
     <string name="geofence_clear">Clear</string>
     <string name="geofence_empty">Nothing yet. Entries appear when you leave the ring — plain \"still inside\" checks are not recorded.</string>
