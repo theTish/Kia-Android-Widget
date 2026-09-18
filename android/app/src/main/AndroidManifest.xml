@@ -9,7 +9,7 @@
         android:icon="@drawable/ic_kia"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault">
+        android:theme="@style/KiaTheme">
 
         <activity
             android:name=".MainActivity"

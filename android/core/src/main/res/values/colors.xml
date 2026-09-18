@@ -4,18 +4,23 @@
     Shared by :app and :tile through resource merging.
 -->
 <resources>
-    <color name="lock">#FF2E7D32</color>
-    <color name="unlock">#FF37474F</color>
-    <color name="climate">#FF1565C0</color>
-    <color name="text">#FFFFFFFF</color>
-    <color name="text_dim">#FFB0BEC5</color>
-
-    <!--
-        Deliberately pure black, unlike KiaColors.BACKGROUND. This one backs a
-        full screen activity, where black is right on OLED; the widget and tile
-        are cards on a wallpaper and use the lighter tone so their edges read.
-    -->
     <color name="background">#FF000000</color>
-    <color name="armed_text">#FFFFB74D</color>
-    <color name="neutral">#FF263238</color>
+    <color name="surface">#FF111417</color>
+    <color name="surface_2">#FF15191C</color>
+    <color name="card">#FF0B0D0F</color>
+    <color name="line">#FF262B30</color>
+    <color name="divider">#FF22272B</color>
+    <color name="track">#FF1A1E22</color>
+
+    <color name="text">#FFF3F5F0</color>
+    <color name="text_dim">#FFA3ABB0</color>
+    <color name="text_muted">#FF7C858B</color>
+
+    <color name="accent">#FFD4F53C</color>
+    <color name="accent_ink">#FF0B0D05</color>
+
+    <color name="armed">#FFFFB547</color>
+    <color name="armed_ink">#FF1A1204</color>
+    <color name="armed_bg">#FF211808</color>
+    <color name="armed_line">#FF4A340F</color>
 </resources>

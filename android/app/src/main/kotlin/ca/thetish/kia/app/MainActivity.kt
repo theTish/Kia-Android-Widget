@@ -2,13 +2,20 @@ package ca.thetish.kia.app
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.view.View
-import android.widget.Button
+import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import ca.thetish.kia.core.ApiResult
 import ca.thetish.kia.core.KiaApi
@@ -16,6 +23,7 @@ import ca.thetish.kia.core.KiaSettings
 import ca.thetish.kia.core.UnlockGuard
 import ca.thetish.kia.core.VehicleStatus
 import ca.thetish.kia.core.R as CoreR
+import java.text.NumberFormat
 import java.util.concurrent.Executors
 
 /**
@@ -24,19 +32,34 @@ import java.util.concurrent.Executors
  * The widget is what gets used day to day; this screen exists for the long tail
  * /status returns that would be unreadable on a widget - tyre and fluid
  * warnings, service interval, charge limits, climate readback, where the car is.
+ *
+ * Everything the car did not report renders as an em dash or as "Not reported",
+ * never as zero. The EV6 routinely answers with no EV data at all, and a 0%
+ * battery over a car sitting on 75% is worse than no number.
  */
 class MainActivity : Activity() {
 
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
+    private val numbers: NumberFormat = NumberFormat.getIntegerInstance()
 
-    private lateinit var headline: TextView
-    private lateinit var lockState: TextView
     private lateinit var status: TextView
-    private lateinit var lockButton: Button
-    private lateinit var unlockButton: Button
-    private lateinit var climateButton: Button
-    private lateinit var mapButton: Button
+    private lateinit var battery: TextView
+    private lateinit var batteryUnit: TextView
+    private lateinit var range: TextView
+    private lateinit var batteryBar: BatteryBarView
+    private lateinit var chargeState: TextView
+    private lateinit var chargeLimit: TextView
+    private lateinit var lockChipIcon: ImageView
+    private lateinit var lockChipText: TextView
+    private lateinit var hint: TextView
+
+    private lateinit var lockButton: LinearLayout
+    private lateinit var unlockButton: LinearLayout
+    private lateinit var unlockIcon: ImageView
+    private lateinit var unlockLabel: TextView
+    private lateinit var climateButton: LinearLayout
+    private lateinit var mapButton: LinearLayout
 
     private var latest: VehicleStatus? = null
 
@@ -47,42 +70,35 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        headline = findViewById(R.id.headline)
-        lockState = findViewById(R.id.lock_state)
         status = findViewById(R.id.status)
+        battery = findViewById(R.id.battery)
+        batteryUnit = findViewById(R.id.battery_unit)
+        range = findViewById(R.id.range)
+        batteryBar = findViewById(R.id.battery_bar)
+        chargeState = findViewById(R.id.charge_state)
+        chargeLimit = findViewById(R.id.charge_limit)
+        lockChipIcon = findViewById(R.id.lock_chip_icon)
+        lockChipText = findViewById(R.id.lock_chip_text)
+        hint = findViewById(R.id.hint)
+
         lockButton = findViewById(R.id.lock)
         unlockButton = findViewById(R.id.unlock)
+        unlockIcon = findViewById(R.id.unlock_icon)
+        unlockLabel = findViewById(R.id.unlock_label)
         climateButton = findViewById(R.id.climate)
         mapButton = findViewById(R.id.map)
 
-        lockButton.setOnClickListener { send("Locking") { KiaApi.lock(KiaSettings.load(this)) } }
+        lockButton.setOnClickListener { send(R.string.lock) { KiaApi.lock(KiaSettings.load(this)) } }
 
         climateButton.setOnClickListener {
-            send("Starting climate") { KiaApi.startClimate(KiaSettings.load(this)) }
+            send(R.string.climate) { KiaApi.startClimate(KiaSettings.load(this)) }
         }
 
-        unlockButton.setOnClickListener {
-            val now = SystemClock.elapsedRealtime()
-            if (UnlockGuard.shouldFire(now, unlockArmedUntil)) {
-                unlockArmedUntil = 0L
-                unlockButton.text = getString(R.string.unlock)
-                send("Unlocking") { KiaApi.unlock(KiaSettings.load(this)) }
-            } else {
-                unlockArmedUntil = UnlockGuard.armUntil(now)
-                unlockButton.text = getString(R.string.unlock_confirm)
-                status.text = getString(R.string.unlock_prompt)
-                main.postDelayed({
-                    if (SystemClock.elapsedRealtime() >= unlockArmedUntil) {
-                        unlockArmedUntil = 0L
-                        unlockButton.text = getString(R.string.unlock)
-                    }
-                }, UnlockGuard.ARM_WINDOW_MS)
-            }
-        }
+        unlockButton.setOnClickListener { onUnlockTapped() }
 
-        findViewById<Button>(R.id.refresh).setOnClickListener { refresh() }
+        findViewById<ImageButton>(R.id.refresh).setOnClickListener { refresh() }
 
-        findViewById<Button>(R.id.settings).setOnClickListener {
+        findViewById<ImageButton>(R.id.settings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
@@ -108,6 +124,45 @@ class MainActivity : Activity() {
         refresh()
     }
 
+    // ── unlock ───────────────────────────────────────────────────────────────
+
+    private fun onUnlockTapped() {
+        val now = SystemClock.elapsedRealtime()
+
+        if (UnlockGuard.shouldFire(now, unlockArmedUntil)) {
+            disarm()
+            send(R.string.unlock) { KiaApi.unlock(KiaSettings.load(this)) }
+            return
+        }
+
+        unlockArmedUntil = UnlockGuard.armUntil(now)
+        setUnlockArmed(true)
+        hint.text = getString(R.string.unlock_prompt)
+
+        main.postDelayed({
+            // A second tap may have fired and re-disarmed in the meantime.
+            if (SystemClock.elapsedRealtime() >= unlockArmedUntil) disarm()
+        }, UnlockGuard.ARM_WINDOW_MS)
+    }
+
+    private fun disarm() {
+        unlockArmedUntil = 0L
+        setUnlockArmed(false)
+        hint.text = ""
+    }
+
+    private fun setUnlockArmed(armed: Boolean) {
+        unlockButton.setBackgroundResource(
+            if (armed) R.drawable.control_armed else R.drawable.control_surface
+        )
+        val ink = getColor(if (armed) CoreR.color.armed_ink else CoreR.color.text)
+        unlockIcon.setColorFilter(ink)
+        unlockLabel.setTextColor(ink)
+        unlockLabel.setText(if (armed) R.string.unlock_confirm else R.string.unlock)
+    }
+
+    // ── loading ──────────────────────────────────────────────────────────────
+
     private fun refresh() {
         status.text = getString(R.string.loading)
         io.execute {
@@ -126,79 +181,9 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun render(s: VehicleStatus) {
-        headline.text = buildList {
-            s.batteryPercent?.let { add("$it%") }
-            s.range?.let { add("$it ${s.rangeUnit ?: "km"}") }
-        }.joinToString("  ·  ").ifEmpty { getString(R.string.app_name) }
-
-        lockState.text = when (s.isLocked) {
-            true -> getString(R.string.locked_state)
-            false -> getString(R.string.unlocked_state)
-            null -> getString(R.string.lock_unknown)
-        }
-        // An unlocked car is the one state worth colouring.
-        lockState.setTextColor(
-            getColor(if (s.isLocked == false) CoreR.color.armed_text else CoreR.color.text_dim)
-        )
-
-        // Warnings first: anything needing attention should not sit below the
-        // fold under charge limits.
-        section(R.id.warnings_heading, R.id.warnings, buildList {
-            addAll(s.warnings)
-            if (s.openings.isNotEmpty()) add("Open: " + s.openings.joinToString(", "))
-            if (s.engineRunning == true) add("Engine running")
-        }.joinToString("\n"))
-
-        section(R.id.charge_heading, R.id.charge, buildList {
-            if (s.isCharging) {
-                add("Charging" + (s.chargeRemainingText?.let { " - $it" } ?: ""))
-                s.chargingEta?.let { add("Full at $it") }
-            } else if (s.pluggedIn) {
-                add("Plugged in" + (s.plugType?.let { " ($it)" } ?: "") + ", not charging")
-            } else {
-                add("Not plugged in")
-            }
-            if (s.chargeLimitAc != null && s.chargeLimitDc != null) {
-                add("Limits: ${s.chargeLimitAc}% AC / ${s.chargeLimitDc}% DC")
-            }
-            s.battery12v?.let { add("12V battery: $it%") }
-        }.joinToString("\n"))
-
-        section(R.id.climate_heading, R.id.climate_info, buildList {
-            add(if (s.climateOn == true) "Running" else "Off")
-            s.setTemperature?.let { add("Set to $it°C") }
-            if (s.defrostOn == true) add("Defrost on")
-            if (s.steeringWheelHeaterOn == true) add("Steering wheel heater on")
-            if (s.rearWindowHeaterOn == true) add("Rear window heater on")
-        }.joinToString("\n"))
-
-        section(R.id.car_heading, R.id.car, buildList {
-            s.odometer?.let { add("Odometer: ${it.toInt()} ${s.odometerUnit ?: "km"}") }
-            s.serviceDistanceToNext?.let { add("Next service at ${it.toInt()} km") }
-            if (!s.windowsReported) add("Windows: not reported by this car")
-        }.joinToString("\n"))
-
-        mapButton.visibility = if (s.latitude != null) View.VISIBLE else View.GONE
-    }
-
-    /** Shows a section only when it has something to say. */
-    private fun section(headingId: Int, bodyId: Int, text: String) {
-        val visible = text.isNotBlank()
-        findViewById<TextView>(headingId).visibility = if (visible) View.VISIBLE else View.GONE
-        findViewById<TextView>(bodyId).apply {
-            visibility = if (visible) View.VISIBLE else View.GONE
-            this.text = text
-        }
-    }
-
-    /** "2026-09-17T22:12:06+00:00" -> "22:12". A freshness hint, not a clock. */
-    private fun shortTime(iso: String?): String =
-        iso?.substringAfter('T')?.take(5) ?: "?"
-
-    private fun send(label: String, call: () -> ApiResult) {
+    private fun send(labelRes: Int, call: () -> ApiResult) {
         setButtonsEnabled(false)
-        status.text = getString(R.string.working, label)
+        status.text = getString(R.string.working, getString(labelRes))
 
         io.execute {
             val result = call()
@@ -216,7 +201,171 @@ class MainActivity : Activity() {
         lockButton.isEnabled = enabled
         unlockButton.isEnabled = enabled
         climateButton.isEnabled = enabled
+        val alpha = if (enabled) 1f else 0.5f
+        lockButton.alpha = alpha
+        unlockButton.alpha = alpha
+        climateButton.alpha = alpha
     }
+
+    // ── rendering ────────────────────────────────────────────────────────────
+
+    private fun render(s: VehicleStatus) {
+        renderCharge(s)
+        renderLockChip(s)
+        renderAttention(s)
+        renderCards(s)
+
+        mapButton.visibility = if (s.latitude != null) View.VISIBLE else View.GONE
+    }
+
+    private fun renderCharge(s: VehicleStatus) {
+        battery.text = s.batteryPercent?.toString() ?: getString(R.string.no_value)
+        batteryUnit.visibility = if (s.batteryPercent != null) View.VISIBLE else View.GONE
+
+        range.text = if (s.range != null) {
+            // The distance carries the weight; "range" is only the unit of
+            // meaning, so it stays dim and light.
+            val value = getString(R.string.range_value, s.range, s.rangeUnit ?: DEFAULT_UNIT)
+            SpannableStringBuilder(value).apply {
+                setSpan(ForegroundColorSpan(getColor(CoreR.color.text)), 0, length, SPAN)
+                setSpan(StyleSpan(Typeface.BOLD), 0, length, SPAN)
+                append(" ").append(getString(R.string.range_suffix))
+            }
+        } else {
+            getString(R.string.range_unknown)
+        }
+
+        batteryBar.show(s.batteryPercent, s.chargeLimitAc)
+
+        chargeState.text = when {
+            s.isCharging -> s.chargeRemainingText
+                ?.let { getString(R.string.charge_charging_left, it) }
+                ?: getString(R.string.charge_charging)
+
+            s.pluggedIn -> s.plugType
+                ?.let { getString(R.string.charge_plugged_type, it) }
+                ?: getString(R.string.charge_plugged)
+
+            else -> getString(R.string.charge_unplugged)
+        }
+        // Charging is the one charge state worth colouring, and it matches the
+        // bar directly above it.
+        chargeState.setTextColor(
+            getColor(if (s.isCharging) CoreR.color.accent else CoreR.color.text_dim)
+        )
+
+        chargeLimit.text = s.chargeLimitAc?.let { getString(R.string.charge_limit, it) } ?: ""
+    }
+
+    private fun renderLockChip(s: VehicleStatus) {
+        val locked = s.isLocked
+        lockChipText.setText(
+            when (locked) {
+                true -> R.string.locked_state
+                false -> R.string.unlocked_state
+                null -> R.string.lock_unknown
+            }
+        )
+        lockChipIcon.setImageResource(
+            if (locked == false) CoreR.drawable.ic_unlock else CoreR.drawable.ic_lock
+        )
+        // Amber, not red: an unlocked car is worth noticing, not an emergency.
+        val tint = getColor(
+            when (locked) {
+                true -> CoreR.color.accent
+                false -> CoreR.color.armed
+                null -> CoreR.color.text_muted
+            }
+        )
+        lockChipIcon.setColorFilter(tint)
+        lockChipText.setTextColor(
+            getColor(if (locked == null) CoreR.color.text_muted else CoreR.color.text)
+        )
+    }
+
+    private fun renderAttention(s: VehicleStatus) {
+        val lines = buildList {
+            addAll(s.warnings)
+            if (s.openings.isNotEmpty()) {
+                add(getString(R.string.opening_list, s.openings.joinToString(", ")))
+            }
+            if (s.engineRunning == true) add(getString(R.string.engine_running))
+        }
+
+        findViewById<View>(R.id.attention_card).visibility =
+            if (lines.isEmpty()) View.GONE else View.VISIBLE
+        findViewById<TextView>(R.id.attention).text = lines.joinToString("\n")
+    }
+
+    private fun renderCards(s: VehicleStatus) {
+        findViewById<TextView>(R.id.ac_limit).text = percentOrDash(s.chargeLimitAc)
+        findViewById<TextView>(R.id.dc_limit).text = percentOrDash(s.chargeLimitDc)
+        findViewById<TextView>(R.id.battery_12v).text = percentOrDash(s.battery12v)
+
+        findViewById<TextView>(R.id.climate_value).text = s.setTemperature
+            ?.let { getString(R.string.climate_temperature, trimDecimal(it)) }
+            ?: getString(R.string.no_value)
+
+        findViewById<TextView>(R.id.climate_sub).text = buildList {
+            when (s.climateOn) {
+                true -> add(getString(R.string.climate_running))
+                false -> add(getString(R.string.climate_off))
+                null -> {}
+            }
+            if (s.defrostOn == true) add(getString(R.string.climate_defrost))
+            if (s.steeringWheelHeaterOn == true) add(getString(R.string.climate_wheel))
+            if (s.rearWindowHeaterOn == true) add(getString(R.string.climate_rear))
+            add(getString(R.string.climate_preset, KiaSettings.load(this@MainActivity).climatePreset))
+        }.joinToString(" · ")
+
+        val service = findViewById<TextView>(R.id.service_value)
+        service.text = s.serviceDistanceToNext
+            ?.let { numbers.format(it.toInt()) }
+            ?: getString(R.string.no_value)
+        findViewById<TextView>(R.id.service_sub).visibility =
+            if (s.serviceDistanceToNext != null) View.VISIBLE else View.INVISIBLE
+
+        findViewById<TextView>(R.id.odometer).text = s.odometer
+            ?.let { getString(R.string.distance_value, numbers.format(it.toInt()), s.odometerUnit ?: DEFAULT_UNIT) }
+            ?: getString(R.string.no_value)
+
+        setRow(R.id.doors, s.doorsOpen.joinToString(", "), known = true)
+        // The distinction matters: this EV6 never reports windows at all, and
+        // "All shut" would be a claim the car never made.
+        setRow(R.id.windows, s.windowsOpen.joinToString(", "), known = s.windowsReported)
+    }
+
+    /** A row of openings: the list when something is open, "All shut" when not. */
+    private fun setRow(id: Int, open: String, known: Boolean) {
+        val view = findViewById<TextView>(id)
+        when {
+            !known -> {
+                view.setText(R.string.not_reported)
+                view.setTextColor(getColor(CoreR.color.text_muted))
+            }
+
+            open.isEmpty() -> {
+                view.setText(R.string.all_shut)
+                view.setTextColor(getColor(CoreR.color.text))
+            }
+
+            else -> {
+                view.text = open
+                view.setTextColor(getColor(CoreR.color.armed))
+            }
+        }
+    }
+
+    private fun percentOrDash(value: Int?): String =
+        value?.let { getString(R.string.percent_value, it) } ?: getString(R.string.no_value)
+
+    /** 21.0 -> "21", 21.5 -> "21.5". A whole number should not carry a ".0". */
+    private fun trimDecimal(value: Double): String =
+        if (value == value.toInt().toDouble()) value.toInt().toString() else value.toString()
+
+    /** "2026-09-17T22:12:06+00:00" -> "22:12". A freshness hint, not a clock. */
+    private fun shortTime(iso: String?): String =
+        iso?.substringAfter('T')?.take(5) ?: "?"
 
     override fun onDestroy() {
         super.onDestroy()
@@ -224,5 +373,10 @@ class MainActivity : Activity() {
         // let it hold this Activity and its view tree for the full 45s timeout.
         io.shutdownNow()
         main.removeCallbacksAndMessages(null)
+    }
+
+    private companion object {
+        const val DEFAULT_UNIT = "km"
+        const val SPAN = Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
     }
 }

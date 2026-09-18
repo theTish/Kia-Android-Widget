@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Glass, built as four rounded rectangles rather than a real blur.
+
+    A widget cannot blur what is behind it - it has no access to the
+    wallpaper - so this fakes the read: a dark translucent tint lets the
+    wallpaper's colour through, a diagonal sheen and a soft top-left
+    highlight stand in for light catching a pane, and a bright hairline
+    edge gives it a lip.
+
+    Every layer is itself a 28dp rounded rectangle, which is what keeps the
+    sheen and the highlight inside the corners: a layer-list does not clip
+    its children to the layer beneath, so an oval highlight would spill out
+    past the rounded corners onto the wallpaper.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Tint. 34% of near-black, so the wallpaper reads through. -->
+    <item>
+        <shape
+            android:shape="rectangle">
+            <corners android:radius="28dp" />
+            <solid android:color="#570C0E14" />
+        </shape>
+    </item>
+
+    <!-- Diagonal sheen: 20% at the top-left corner falling to 5%, back up to 10%. -->
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="28dp" />
+            <gradient
+                android:angle="315"
+                android:startColor="#33FFFFFF"
+                android:centerColor="#0DFFFFFF"
+                android:endColor="#1AFFFFFF"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <!-- The highlight, as if a light source sat above the top-left corner. -->
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="28dp" />
+            <gradient
+                android:centerX="0.18"
+                android:centerY="0.0"
+                android:gradientRadius="60%p"
+                android:startColor="#38FFFFFF"
+                android:endColor="#00FFFFFF"
+                android:type="radial" />
+        </shape>
+    </item>
+
+    <!-- Edge last, so nothing above paints over it. -->
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="28dp" />
+            <solid android:color="#00000000" />
+            <stroke android:width="1dp" android:color="#47FFFFFF" />
+        </shape>
+    </item>
+
+</layer-list>

@@ -44,6 +44,7 @@ object KiaSettings {
     private const val KEY_BASE_URL = "base_url"
     private const val KEY_SECRET = "secret"
     private const val KEY_PRESET = "climate_preset"
+    private const val KEY_WIDGET_BACKGROUND = "widget_background"
 
     /** Offered in the UI so switching hosts does not mean typing a URL. */
     val KNOWN_HOSTS = listOf(
@@ -52,6 +53,17 @@ object KiaSettings {
     )
 
     val PRESETS = listOf("winter", "summer", "springfall")
+
+    /**
+     * How the widget paints its card.
+     *
+     * Glass by default because it is the one that looks deliberate on a photo
+     * wallpaper; solid exists because a busy wallpaper eats it, and nothing the
+     * widget can do about that is worth the guess.
+     */
+    const val BACKGROUND_GLASS = "glass"
+    const val BACKGROUND_SOLID = "solid"
+    val BACKGROUNDS = listOf(BACKGROUND_GLASS, BACKGROUND_SOLID)
 
     fun load(context: Context): KiaConfig {
         val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -67,12 +79,26 @@ object KiaSettings {
         )
     }
 
-    fun save(context: Context, baseUrl: String, secret: String, climatePreset: String) {
+    /** Presentation, not connection, so it is read on its own rather than through KiaConfig. */
+    fun widgetBackground(context: Context): String =
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString(KEY_WIDGET_BACKGROUND, null)
+            ?.takeIf { it in BACKGROUNDS }
+            ?: BACKGROUND_GLASS
+
+    fun save(
+        context: Context,
+        baseUrl: String,
+        secret: String,
+        climatePreset: String,
+        widgetBackground: String,
+    ) {
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_BASE_URL, baseUrl.trim().trimEnd('/'))
             .putString(KEY_SECRET, secret.trim())
             .putString(KEY_PRESET, climatePreset.trim())
+            .putString(KEY_WIDGET_BACKGROUND, widgetBackground)
             .apply()
     }
 

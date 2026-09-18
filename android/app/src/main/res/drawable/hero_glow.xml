@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The accent bloom under the wheels, which is all that stops the car
+    floating in the black.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <gradient
+        android:centerX="0.5"
+        android:centerY="0.5"
+        android:gradientRadius="50%p"
+        android:startColor="#38D4F53C"
+        android:endColor="#00D4F53C"
+        android:type="radial" />
+</shape>

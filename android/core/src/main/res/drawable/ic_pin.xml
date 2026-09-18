@@ -9,17 +9,17 @@
     <path
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2.0"
+        android:strokeWidth="1.8"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M7,11 L17,11 A2,2 0 0 1 19,13 L19,19 A2,2 0 0 1 17,21 L7,21 A2,2 0 0 1 5,19 L5,13 A2,2 0 0 1 7,11 Z" />
+        android:pathData="M12,21 C12,21 19,14.5 19,9 A7,7 0 0 0 5,9 C5,14.5 12,21 12,21 Z" />
 
     <path
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2.0"
+        android:strokeWidth="1.8"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M8,11 V7 A4,4 0 0 1 16,7 V11" />
+        android:pathData="M9.5,9 A2.5,2.5 0 1 0 14.5,9 A2.5,2.5 0 1 0 9.5,9 Z" />
 
 </vector>

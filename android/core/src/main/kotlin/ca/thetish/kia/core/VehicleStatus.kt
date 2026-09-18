@@ -36,8 +36,10 @@ data class VehicleStatus(
     // Security
     val isLocked: Boolean?,
     val engineRunning: Boolean?,
-    /** Human names of anything standing open, empty when all shut. */
-    val openings: List<String>,
+    /** Human names of any door or boot standing open, empty when all shut. */
+    val doorsOpen: List<String>,
+    /** Human names of any window standing open, empty when all shut. */
+    val windowsOpen: List<String>,
     /** True only if the car actually reported window state; this EV6 never does. */
     val windowsReported: Boolean,
 
@@ -58,6 +60,16 @@ data class VehicleStatus(
     val lastUpdated: String?,
 ) {
     val hasEvData: Boolean get() = batteryPercent != null
+
+    /**
+     * Everything standing open, in one list.
+     *
+     * The two are kept apart above because the home screen lists doors and
+     * windows on separate rows, and windows have their own "the car never says"
+     * case; anywhere that just needs "is something open" wants them together.
+     */
+    val openings: List<String>
+        get() = doorsOpen + windowsOpen.map { "$it window" }
 
     companion object {
         private val OPENING_LABELS = mapOf(
@@ -90,11 +102,6 @@ data class VehicleStatus(
             val doors = json.optJSONObject("doors")
             val windows = json.optJSONObject("windows")
 
-            val openings = buildList {
-                addAll(namesOfTrue(doors))
-                addAll(namesOfTrue(windows).map { "$it window" })
-            }
-
             return VehicleStatus(
                 batteryPercent = json.intOrNull("battery_percentage"),
                 battery12v = json.intOrNull("battery_12v"),
@@ -114,7 +121,8 @@ data class VehicleStatus(
 
                 isLocked = json.boolOrNull("is_locked"),
                 engineRunning = json.boolOrNull("engine_running"),
-                openings = openings,
+                doorsOpen = namesOfTrue(doors),
+                windowsOpen = namesOfTrue(windows),
                 windowsReported = windows?.keys()?.asSequence()
                     ?.any { !windows.isNull(it) } ?: false,
 
