@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>EV6 GT — Settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&amp;family=Manrope:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#000;font-family:Manrope,'Segoe UI',system-ui,sans-serif;color:#F3F5F0}
+a{color:#D4F53C}a:hover{color:#E6FF7A}
+button,input{font-family:inherit}
+input::placeholder{color:#7C858B}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #000000; color: #F3F5F0; font-family: Manrope, 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column;">
+
+<header style="display: flex; align-items: center; gap: 4px; padding: 20px 16px 0 8px;">
+<a href="Main.dc.html" aria-label="Back" style="width: 48px; height: 48px; border-radius: 24px; color: #F3F5F0; display: flex; align-items: center; justify-content: center;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg></a>
+<h1 style="margin: 0; font-family: 'Chakra Petch', 'Segoe UI', sans-serif; font-size: 22px; font-weight: 600; letter-spacing: 0.04em;">Settings</h1>
+</header>
+
+<form style="padding: 24px 16px 0; display: flex; flex-direction: column; gap: 22px;">
+
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<label for="api" style="padding-left: 4px; font-size: 13px; font-weight: 600; color: #A3ABB0;">API address</label>
+<input id="api" type="url" placeholder="https://…" style="height: 56px; box-sizing: border-box; padding: 0 18px; border-radius: 16px; border: 1px solid #262B30; background: #111417; color: #F3F5F0; font-size: 16px; outline: none;">
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<label for="key" style="padding-left: 4px; font-size: 13px; font-weight: 600; color: #A3ABB0;">API key</label>
+<div style="display: flex; align-items: center; height: 56px; box-sizing: border-box; padding: 0 4px 0 18px; border-radius: 16px; border: 1px solid #262B30; background: #111417;">
+<input id="key" type="password" value="xxxxxxxxxxxxxxxx" style="flex-grow: 1; min-width: 0; border: none; background: transparent; color: #F3F5F0; font-size: 16px; outline: none;">
+<button type="button" aria-label="Show key" style="width: 48px; height: 48px; border: none; border-radius: 24px; background: transparent; color: #A3ABB0; display: flex; align-items: center; justify-content: center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+</div>
+</div>
+
+<fieldset style="margin: 0; padding: 0; border: none; display: flex; flex-direction: column; gap: 8px;">
+<legend style="padding: 0 0 8px 4px; font-size: 13px; font-weight: 600; color: #A3ABB0;">Climate preset</legend>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 18px; background: #111417; border: 1px solid #262B30;">
+<sc-for list="{{presets}}" as="p" hint-placeholder-count="3">
+<button type="button" onClick="{{p.pick}}" aria-pressed="{{p.pressed}}" style="height: 48px; border: none; border-radius: 14px; background: {{p.bg}}; color: {{p.ink}}; font-size: 15px; font-weight: 700;">{{p.label}}</button>
+</sc-for>
+</div>
+</fieldset>
+
+<div style="display: flex; flex-direction: column; gap: 12px; margin-top: 6px;">
+<button type="button" style="height: 56px; border: 1px solid #262B30; border-radius: 28px; background: transparent; color: #F3F5F0; font-size: 16px; font-weight: 600;">Test connection</button>
+<div style="display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14px; color: #D4F53C;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg>Works — battery 78%</div>
+</div>
+</form>
+
+<div style="flex-grow: 1;"></div>
+
+<footer style="padding: 0 16px 28px; display: flex; flex-direction: column; gap: 16px;">
+<p style="margin: 0; padding: 0 4px; font-size: 13px; line-height: 1.5; color: #8E979C;">The watch tile is a separate install on a separate device, so it keeps whatever was compiled into it and is not affected by these settings.</p>
+<button type="button" style="height: 56px; border: none; border-radius: 28px; background: #D4F53C; color: #0B0D05; font-size: 16px; font-weight: 700;">Save</button>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { preset: 'winter' }; }
+  renderVals() {
+    const names = [['winter', 'Winter'], ['summer', 'Summer'], ['springfall', 'Spring/Fall']];
+    return {
+      presets: names.map(([id, label]) => ({
+        label,
+        pressed: this.state.preset === id ? 'true' : 'false',
+        bg: this.state.preset === id ? '#262B30' : 'transparent',
+        ink: this.state.preset === id ? '#F3F5F0' : '#A3ABB0',
+        pick: () => this.setState({ preset: id })
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

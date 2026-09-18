@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>EV6 GT — Home</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&amp;family=Manrope:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#000;font-family:Manrope,'Segoe UI',system-ui,sans-serif;color:#F3F5F0}
+a{color:#D4F53C}a:hover{color:#E6FF7A}
+button{font-family:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 1320px; box-sizing: border-box; background: #000000; color: #F3F5F0; font-family: Manrope, 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden;">
+
+<header style="display: flex; align-items: center; justify-content: space-between; padding: 20px 16px 0 24px;">
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="font-family: 'Chakra Petch', 'Segoe UI', sans-serif; font-size: 20px; font-weight: 700; letter-spacing: 0.08em;">EV6 <span style="color: {{accent}};">GT</span></div>
+<div style="font-size: 13px; color: #A3ABB0;">Updated 22:12</div>
+</div>
+<div style="display: flex; gap: 4px;">
+<button aria-label="Refresh" style="width: 48px; height: 48px; border: none; border-radius: 24px; background: transparent; color: #F3F5F0; display: flex; align-items: center; justify-content: center;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></svg></button>
+<a href="Settings.dc.html" aria-label="Settings" style="width: 48px; height: 48px; border-radius: 24px; color: #F3F5F0; display: flex; align-items: center; justify-content: center;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"></path><circle cx="16" cy="7" r="2"></circle><circle cx="10" cy="17" r="2"></circle></svg></a>
+</div>
+</header>
+
+<section style="position: relative; height: 208px; margin-top: 4px; display: flex; align-items: flex-end; justify-content: center;">
+<div style="position: absolute; left: 30px; right: 30px; bottom: 6px; height: 44px; border-radius: 50%; background: radial-gradient(closest-side, rgba(212,245,60,0.22), rgba(212,245,60,0));"></div>
+<div style="position: absolute; left: 24px; right: 24px; bottom: 16px; height: 1px; background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.18), rgba(255,255,255,0));"></div>
+<img src="../design-assets/ev6gt-front34.png" alt="White 2024 Kia EV6 GT" style="position: relative; width: 360px; height: auto; margin-bottom: 0;">
+</section>
+
+<section style="padding: 8px 24px 0; display: flex; align-items: flex-end; justify-content: space-between;">
+<div style="display: flex; flex-direction: column;">
+<div style="display: flex; align-items: baseline; gap: 2px; font-family: 'Chakra Petch', 'Segoe UI', sans-serif; line-height: 1;">
+<span style="font-size: 88px; font-weight: 600; letter-spacing: -0.02em;">78</span>
+<span style="font-size: 32px; font-weight: 600; color: #A3ABB0;">%</span>
+</div>
+<div style="font-size: 17px; color: #A3ABB0; margin-top: 4px;"><span style="color: #F3F5F0; font-weight: 600;">412 km</span> range</div>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 18px; background: #111417; border: 1px solid #262B30; font-size: 14px; font-weight: 600; margin-bottom: 6px;">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{accent}}" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>Locked
+</div>
+</section>
+
+<section style="padding: 20px 24px 0; display: flex; flex-direction: column; gap: 8px;">
+<div style="position: relative; height: 10px; border-radius: 5px; background: #1A1E22;">
+<div style="position: absolute; left: 0; top: 0; bottom: 0; width: 78%; border-radius: 5px; background: {{accent}};"></div>
+<div style="position: absolute; left: 80%; top: -4px; bottom: -4px; width: 2px; border-radius: 1px; background: #F3F5F0;"></div>
+</div>
+<div style="display: flex; justify-content: space-between; font-size: 13px; color: #A3ABB0;">
+<span>Not plugged in</span><span>Limit 80%</span>
+</div>
+</section>
+
+<section style="padding: 28px 16px 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;">
+<button style="height: 104px; border: none; border-radius: 22px; background: {{accent}}; color: #0B0D05; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 15px; font-weight: 700;"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>Lock</button>
+<button onClick="{{armUnlock}}" style="height: 104px; border-radius: 22px; border: {{unlockBorder}}; background: {{unlockBg}}; color: {{unlockInk}}; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 15px; font-weight: 700;"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 7.5-2"></path></svg>{{unlockLabel}}</button>
+<button style="height: 104px; border: 1px solid #262B30; border-radius: 22px; background: #111417; color: #F3F5F0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 15px; font-weight: 700;"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 8h11a3 3 0 1 0-3-3"></path><path d="M3 12h16a3 3 0 1 1-3 3"></path><path d="M3 16h7"></path></svg>Climate</button>
+</section>
+<div style="height: 22px; padding: 10px 24px 0; font-size: 13px; color: #FFB547; text-align: center;">{{hint}}</div>
+
+<section style="padding: 14px 16px 0; display: flex; flex-direction: column; gap: 10px;">
+
+<div style="display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: 20px; background: #211808; border: 1px solid #4A340F;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FFB547" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20z"></path><path d="M12 10v4M12 17v.01"></path></svg>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #FFB547;">Needs attention</div>
+<div style="font-size: 15px; color: #F3F5F0;">Tyre: front left</div>
+</div>
+</div>
+
+<div style="padding: 18px; border-radius: 20px; background: #111417; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; align-items: center; gap: 10px; font-family: 'Chakra Petch', 'Segoe UI', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #A3ABB0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"></path></svg>Charge</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12px; color: #A3ABB0;">AC limit</span><span style="font-family: 'Chakra Petch', sans-serif; font-size: 22px; font-weight: 600;">80%</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12px; color: #A3ABB0;">DC limit</span><span style="font-family: 'Chakra Petch', sans-serif; font-size: 22px; font-weight: 600;">90%</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12px; color: #A3ABB0;">12V battery</span><span style="font-family: 'Chakra Petch', sans-serif; font-size: 22px; font-weight: 600;">88%</span></div>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;">
+<div style="padding: 18px; border-radius: 20px; background: #111417; display: flex; flex-direction: column; gap: 12px;">
+<div style="font-family: 'Chakra Petch', 'Segoe UI', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #A3ABB0;">Climate</div>
+<div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-family: 'Chakra Petch', sans-serif; font-size: 30px; font-weight: 600; line-height: 1.1;">21°</span><span style="font-size: 13px; color: #A3ABB0;">Off · winter preset</span></div>
+</div>
+<div style="padding: 18px; border-radius: 20px; background: #111417; display: flex; flex-direction: column; gap: 12px;">
+<div style="font-family: 'Chakra Petch', 'Segoe UI', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #A3ABB0;">Service</div>
+<div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-family: 'Chakra Petch', sans-serif; font-size: 30px; font-weight: 600; line-height: 1.1;">1,580</span><span style="font-size: 13px; color: #A3ABB0;">km to next service</span></div>
+</div>
+</div>
+
+<div style="padding: 6px 18px; border-radius: 20px; background: #111417; display: flex; flex-direction: column;">
+<div style="display: flex; justify-content: space-between; align-items: center; min-height: 48px; border-bottom: 1px solid #22272B; font-size: 15px;"><span style="color: #A3ABB0;">Odometer</span><span style="font-weight: 600;">18,420 km</span></div>
+<div style="display: flex; justify-content: space-between; align-items: center; min-height: 48px; border-bottom: 1px solid #22272B; font-size: 15px;"><span style="color: #A3ABB0;">Doors &amp; boot</span><span style="font-weight: 600;">All shut</span></div>
+<div style="display: flex; justify-content: space-between; align-items: center; min-height: 48px; font-size: 15px;"><span style="color: #A3ABB0;">Windows</span><span style="color: #7C858B;">Not reported</span></div>
+</div>
+
+<button style="height: 56px; border: 1px solid #262B30; border-radius: 28px; background: transparent; color: #F3F5F0; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; font-weight: 600;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 21s7-6.5 7-12a7 7 0 0 0-14 0c0 5.5 7 12 7 12z"></path><circle cx="12" cy="9" r="2.5"></circle></svg>Show on map</button>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#D4F53C","options":["#D4F53C","#5EE6C8","#F3F5F0"]},"$preview":{"width":390,"height":1320}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { armed: false }; }
+  componentWillUnmount() { clearTimeout(this.t); }
+  renderVals() {
+    const armed = this.state.armed;
+    return {
+      accent: this.props.accent ?? '#D4F53C',
+      armUnlock: () => {
+        clearTimeout(this.t);
+        if (armed) { this.setState({ armed: false }); return; }
+        this.setState({ armed: true });
+        this.t = setTimeout(() => this.setState({ armed: false }), 4000);
+      },
+      unlockLabel: armed ? 'Confirm' : 'Unlock',
+      unlockBg: armed ? '#FFB547' : '#111417',
+      unlockInk: armed ? '#1A1204' : '#F3F5F0',
+      unlockBorder: armed ? '1px solid #FFB547' : '1px solid #262B30',
+      hint: armed ? 'Tap Confirm to unlock' : ''
+    };
+  }
+}
+</script>
+</body>
+</html>
