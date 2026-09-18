@@ -4,8 +4,8 @@ Exercises every endpoint against a stubbed VehicleManager, so it needs no
 credentials and never touches the car. Run this after a library upgrade to
 confirm the vehicle attributes /status reads still exist:
 
-    pip install -r requirements.txt
-    python tests/test_api.py
+    uv sync
+    .venv/Scripts/python tests/test_api.py      # or .venv/bin/python
 """
 import os, sys, json, datetime
 os.environ.update(KIA_USERNAME="u@e.com", KIA_PASSWORD="pw", KIA_PIN="1234",
@@ -99,6 +99,24 @@ if d:
     check("no actual_charging_power_kw key", "actual_charging_power_kw" not in d)
     check("charge est power present", d["estimated_charging_power_kw"] is not None)
     check("last_updated_at set", d["last_updated_at"] is not None)
+    check("range reported", d["range"]["ev"] == 310.0)
+
+print("\n--- a range of zero means unknown, not empty ---")
+# The car sends 0 rather than null when it has no range for us - seen through a
+# Kia maintenance window, next to a 73% battery, and a forced live poll returned
+# the same 0. A client cannot tell that 0 apart from a measurement, so the API
+# must not hand it on as one.
+fake = reset()
+client.post("/status", headers=H)          # populates the vehicle list
+v = fake.vehicles["VID1"]
+v.ev_driving_range = (0.0, "km")
+v.total_driving_range = (0.0, "km")
+app_mod.vehicle_state_cache["last_update"] = None
+d = client.post("/status", headers=H).get_json()
+check("zero ev range is null", d["range"]["ev"] is None, d["range"])
+check("zero total range is null", d["range"]["total"] is None, d["range"])
+check("unit survives", d["range"]["unit"] == "km", d["range"])
+check("battery untouched", d["battery_percentage"] == 72, d["battery_percentage"])
 
 print("\n--- auth ---")
 reset()

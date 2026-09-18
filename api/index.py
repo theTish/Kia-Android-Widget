@@ -69,6 +69,28 @@ def _int(value):
     return int(value) if value is not None else None
 
 
+def _reported_range(value):
+    """Report an unknown range as null rather than as zero.
+
+    The car does not send null when it has no range for us, it sends 0. Seen on
+    2026-09-17 against a 73% battery, through a Kia maintenance window: the rest
+    of the payload carried last-known values while both range figures were
+    zeroed, and a forced live poll came back with the same 0 because it went
+    through the same unavailable upstream.
+
+    A client cannot tell that 0 apart from a measurement, and "0 km" beside a
+    three-quarters-full battery is a reading nobody should act on. A car
+    genuinely out of charge has a battery percentage to say so.
+    """
+    if value is None:
+        return None
+    try:
+        return None if float(value) <= 0 else value
+    except (TypeError, ValueError):
+        # Not a number at all: pass it through rather than invent a null.
+        return value
+
+
 # ── Environment Variables ──
 USERNAME = _trimmed_env('KIA_USERNAME')
 PASSWORD = _trimmed_env('KIA_PASSWORD')
@@ -780,8 +802,8 @@ def vehicle_status():
         # The library has already mapped the raw unit code to a string
         # ("km"/"mi") when it set these, so they are passed through as-is.
         "range": {
-            "ev": vehicle.ev_driving_range,
-            "total": vehicle.total_driving_range,
+            "ev": _reported_range(vehicle.ev_driving_range),
+            "total": _reported_range(vehicle.total_driving_range),
             "unit": vehicle.ev_driving_range_unit,
         },
         "odometer": {

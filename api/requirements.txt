@@ -1,7 +1,11 @@
-# THIS is the file Vercel installs from. vercel.json points @vercel/python at
-# api/index.py, and the builder reads the requirements.txt next to the
-# entrypoint - the one in the repo root is for Render/Procfile (main.py) and is
-# ignored here. Keep the two in step.
+# The only requirements file that deploys anything. Vercel installs from it
+# because vercel.json points @vercel/python at api/index.py and the builder
+# reads the requirements.txt next to the entrypoint; deploy/Dockerfile copies
+# it explicitly for the Oracle box.
+#
+# There used to be a second one in the repo root, for the Render deployment
+# that ran main.py - both are in archive/render/ now. Local work and the tests
+# use pyproject.toml via `uv sync`.
 Flask>=3.0.0
 hyundai-kia-connect-api==4.31.0
 requests>=2.31.0
