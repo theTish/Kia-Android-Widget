@@ -322,7 +322,16 @@ class MainActivity : Activity() {
             if (s.defrostOn == true) add(getString(R.string.climate_defrost))
             if (s.steeringWheelHeaterOn == true) add(getString(R.string.climate_wheel))
             if (s.rearWindowHeaterOn == true) add(getString(R.string.climate_rear))
-            add(getString(R.string.climate_preset, KiaSettings.load(this@MainActivity).climatePreset))
+            add(
+                getString(
+                    R.string.climate_sends,
+                    ClimateSummary.describe(
+                        this@MainActivity,
+                        KiaSettings.climate(this@MainActivity),
+                        withDuration = false,
+                    ),
+                )
+            )
         }.joinToString(" · ")
 
         renderService(s)

@@ -509,7 +509,7 @@
                 <TextView
                     android:id="@+id/climate_sub"
                     style="@style/CardFigureSub"
-                    tools:text="Off · winter preset" />
+                    tools:text="Off · Sends 21° · seats high" />
 
             </LinearLayout>
 
