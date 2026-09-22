@@ -511,6 +511,16 @@
                     style="@style/CardFigureSub"
                     tools:text="Off · winter preset" />
 
+                <!-- Its own line rather than part of climate_sub: it is a
+                     standing schedule, not what the climate is doing now. -->
+                <TextView
+                    android:id="@+id/climate_precondition"
+                    style="@style/CardFigureSub"
+                    android:layout_marginTop="4dp"
+                    android:visibility="gone"
+                    tools:text="Pre-conditioning: departure 7:30 weekdays"
+                    tools:visibility="visible" />
+
             </LinearLayout>
 
             <Space

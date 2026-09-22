@@ -62,6 +62,12 @@ data class VehicleStatus(
     val steeringWheelHeaterOn: Boolean?,
     val rearWindowHeaterOn: Boolean?,
 
+    /**
+     * The car's scheduled departures, or null when it did not say. Null and
+     * empty differ on purpose: empty would be the car saying none are set.
+     */
+    val departures: List<Departure>?,
+
     // Care
     /** Human names of anything warning, empty when nothing is. */
     val warnings: List<String>,
@@ -80,6 +86,40 @@ data class VehicleStatus(
     val hasEvData: Boolean get() = batteryPercent != null
 
     /**
+     * Whether the climate target is the car's "Lo" rather than a temperature.
+     *
+     * The car sends its target as a hex step, and the library turns step 0
+     * into 14.0 - the bottom of its table, below anything the EV6 lets you
+     * pick. The car's own display calls that step "Lo", and showing "14°"
+     * reads as a setting nobody made.
+     */
+    val climateTargetIsLo: Boolean
+        get() = setTemperature?.let { it <= LO_CELSIUS } ?: false
+
+    /** One scheduled departure. Days count as Kia does: 0 is Sunday. */
+    data class Departure(
+        val slot: Int,
+        val enabled: Boolean?,
+        /** 24-hour "07:30". */
+        val time: String?,
+        val days: List<Int>?,
+        val climateOn: Boolean?,
+        val climateTemperature: Double?,
+    ) {
+        enum class Days { DAILY, WEEKDAYS, WEEKENDS, OTHER }
+
+        /** The common shapes a schedule takes, so a UI can say "weekdays". */
+        val dayPattern: Days?
+            get() = when (days?.toSet()) {
+                null -> null
+                (0..6).toSet() -> Days.DAILY
+                (1..5).toSet() -> Days.WEEKDAYS
+                setOf(0, 6) -> Days.WEEKENDS
+                else -> Days.OTHER
+            }
+    }
+
+    /**
      * Everything standing open, in one list.
      *
      * The two are kept apart above because the home screen lists doors and
@@ -90,6 +130,9 @@ data class VehicleStatus(
         get() = doorsOpen + windowsOpen.map { "$it window" }
 
     companion object {
+        /** What the library decodes the car's "Lo" step to; see climateTargetIsLo. */
+        const val LO_CELSIUS = 14.0
+
         private val OPENING_LABELS = mapOf(
             "front_left" to "front left",
             "front_right" to "front right",
@@ -119,6 +162,7 @@ data class VehicleStatus(
             val location = json.optJSONObject("location")
             val doors = json.optJSONObject("doors")
             val windows = json.optJSONObject("windows")
+            val precondition = json.optJSONObject("preconditioning")
 
             return VehicleStatus(
                 batteryPercent = json.intOrNull("battery_percentage"),
@@ -130,7 +174,8 @@ data class VehicleStatus(
                 chargeRemainingText = json.stringOrNull("charging_duration_formatted"),
                 chargeLimitAc = limits?.intOrNull("ac"),
                 chargeLimitDc = limits?.intOrNull("dc"),
-                batteryPreconditioning = json.boolOrNull("battery_preconditioning"),
+                batteryPreconditioning = precondition?.boolOrNull("battery")
+                    ?: json.boolOrNull("battery_preconditioning"),
 
                 range = range?.doubleOrNull("ev")?.toInt()?.takeIf { it > 0 },
                 rangeUnit = range?.stringOrNull("unit"),
@@ -149,6 +194,20 @@ data class VehicleStatus(
                 defrostOn = climate?.boolOrNull("defrost_on"),
                 steeringWheelHeaterOn = climate?.boolOrNull("steering_wheel_heater_on"),
                 rearWindowHeaterOn = climate?.boolOrNull("rear_window_heater_on"),
+                departures = precondition?.optJSONArray("departures")?.let { arr ->
+                    (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.map { d ->
+                        Departure(
+                            slot = d.optInt("slot"),
+                            enabled = d.boolOrNull("enabled"),
+                            time = d.stringOrNull("time"),
+                            days = d.optJSONArray("days")?.let { days ->
+                                (0 until days.length()).map { days.optInt(it) }
+                            },
+                            climateOn = d.boolOrNull("climate_on"),
+                            climateTemperature = d.doubleOrNull("climate_temperature"),
+                        )
+                    }
+                },
 
                 warnings = WARNING_LABELS.filter { (key, _) ->
                     warnings?.boolOrNull(key) == true
