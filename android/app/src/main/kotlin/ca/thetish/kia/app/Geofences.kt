@@ -80,6 +80,17 @@ object Geofences {
     private const val RESPONSIVENESS_MS = 60_000
 
     /**
+     * How far the car's reported position has to shift to count as a new parking.
+     *
+     * The car's GPS wanders a few metres between reports without the car going
+     * anywhere, and treating that as having moved would re-run the evaluation
+     * every fifteen minutes all day.
+     */
+    private const val MOVED_METRES = 30.0
+
+    private const val FENCE_PREFS = "kia_geofence_fence"
+
+    /**
      * Points the ring at wherever the car last said it was.
      *
      * Called after any status the app or the widget fetches, so the fence
@@ -99,11 +110,23 @@ object Geofences {
 
         val lat = status?.latitude ?: return
         val lon = status.longitude ?: return
-        register(app, lat, lon, KiaSettings.geofenceRadius(app))
+        register(app, lat, lon, KiaSettings.geofenceRadius(app), checkNow = moved(app, lat, lon))
+    }
+
+    /** Whether this position is a different parking from the one the ring is on. */
+    private fun moved(context: Context, lat: Double, lon: Double): Boolean {
+        val prefs = context.getSharedPreferences(FENCE_PREFS, Context.MODE_PRIVATE)
+        if (!prefs.contains("lat")) return true
+        return Geofence.distanceMetres(
+            prefs.getFloat("lat", 0f).toDouble(),
+            prefs.getFloat("lon", 0f).toDouble(),
+            lat,
+            lon,
+        ) > MOVED_METRES
     }
 
     @SuppressLint("MissingPermission") // hasLocationPermission is checked by every caller
-    private fun register(context: Context, lat: Double, lon: Double, radius: Int) {
+    private fun register(context: Context, lat: Double, lon: Double, radius: Int, checkNow: Boolean) {
         val fence = PlayGeofence.Builder()
             .setRequestId(FENCE_ID)
             .setCircularRegion(lat, lon, radius.toFloat())
@@ -113,19 +136,40 @@ object Geofences {
             .build()
 
         val request = GeofencingRequest.Builder()
-            // No initial trigger: registering the fence while the phone is
-            // already away from the car must not read as having just left it.
-            .setInitialTrigger(0)
+            // Only a ring that has just moved gets an initial trigger. The car
+            // reports where it parked some time after it parks, and the poll
+            // only hears about it up to fifteen minutes after that - by which
+            // time you have usually walked off. With no initial trigger the
+            // ring lands around the car with you already outside it, and an
+            // exit never comes: every parking you left promptly went unjudged.
+            // Firing once for the new ring hands that walk to the evaluator,
+            // which still wants an unlocked car and a served dwell before it
+            // decides anything. A ring redrawn in the same place gets none, or
+            // every poll while you are at work would be a fix and a status call.
+            .setInitialTrigger(if (checkNow) GeofencingRequest.INITIAL_TRIGGER_EXIT else 0)
             .addGeofence(fence)
             .build()
 
         LocationServices.getGeofencingClient(context)
             .addGeofences(request, pendingIntent(context))
+            // Remembered only once Play Services has the ring, so a failed
+            // registration still gets its initial check on the next poll.
+            .addOnSuccessListener {
+                if (checkNow) {
+                    context.getSharedPreferences(FENCE_PREFS, Context.MODE_PRIVATE).edit()
+                        .putFloat("lat", lat.toFloat())
+                        .putFloat("lon", lon.toFloat())
+                        .apply()
+                }
+            }
     }
 
     fun remove(context: Context) {
         LocationServices.getGeofencingClient(context.applicationContext)
             .removeGeofences(listOf(FENCE_ID))
+        // So switching back on judges wherever the car is then, not just future exits.
+        context.applicationContext.getSharedPreferences(FENCE_PREFS, Context.MODE_PRIVATE)
+            .edit().clear().apply()
         WorkManager.getInstance(context.applicationContext).cancelUniqueWork(POLL_WORK)
     }
 
@@ -284,14 +328,19 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
     }
 
     /**
-     * The car's own timestamp, which is what the latch keys on.
+     * When the car reported this position, which is what the latch keys on.
+     *
+     * The location's own timestamp, not the status's: the status one moves
+     * every time Kia refreshes anything, so keying on it released the latch
+     * without the car having gone anywhere, and let a position hours old pass
+     * the age check as fresh.
      *
      * Falls back to now when /status gives no parseable time: a latch that
      * never releases would be worse than one that releases too often, since the
      * dwell still has to be served either way.
      */
     private fun positionReportedAt(status: VehicleStatus): Long =
-        status.lastUpdated
+        (status.locationUpdated ?: status.lastUpdated)
             ?.let { runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }
                 .getOrNull() }
             ?: System.currentTimeMillis()

@@ -69,6 +69,12 @@ data class VehicleStatus(
 
     val latitude: Double?,
     val longitude: Double?,
+    /**
+     * When the car last reported its position, as opposed to [lastUpdated],
+     * which moves every time Kia refreshes any part of the status. Only this
+     * one says anything about whether the car has moved.
+     */
+    val locationUpdated: String?,
     val lastUpdated: String?,
 ) {
     val hasEvData: Boolean get() = batteryPercent != null
@@ -151,6 +157,7 @@ data class VehicleStatus(
 
                 latitude = location?.doubleOrNull("latitude"),
                 longitude = location?.doubleOrNull("longitude"),
+                locationUpdated = location?.stringOrNull("last_updated"),
                 lastUpdated = json.stringOrNull("last_updated_at"),
             )
         }
