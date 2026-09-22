@@ -23,6 +23,7 @@ import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.action.Action
 import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
@@ -139,9 +140,15 @@ class KiaWidget : GlanceAppWidget() {
                 .padding(14.dp),
         ) {
             // The row takes the slack, so the controls stay on the bottom edge
-            // however tall the host has made the widget.
+            // however tall the host has made the widget. It is also the tap
+            // target for opening the app: the click sits on the row rather than
+            // on the text, so the whole area above the controls answers, not
+            // just the few pixels a line of type happens to cover.
             Row(
-                modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
+                modifier = GlanceModifier
+                    .fillMaxWidth()
+                    .defaultWeight()
+                    .clickable(actionStartActivity<MainActivity>()),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val carWidth = carWidth(LocalSize.current.width.value)
