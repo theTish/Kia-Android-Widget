@@ -3,9 +3,12 @@ package ca.thetish.kiatile
 import android.os.SystemClock
 import androidx.concurrent.futures.ResolvableFuture
 import ca.thetish.kia.core.ApiResult
+import ca.thetish.kia.core.ClimateSettings
+import ca.thetish.kia.core.ClimateSync
 import ca.thetish.kia.core.KiaApi
 import ca.thetish.kia.core.KiaColors
 import ca.thetish.kia.core.KiaConfig
+import ca.thetish.kia.core.KiaSettings
 import ca.thetish.kia.core.UnlockGuard
 import ca.thetish.kia.core.VehicleStatus
 import ca.thetish.kia.core.R as CoreR
@@ -229,7 +232,7 @@ class KiaTileService : TileService() {
 
             ID_CLIMATE -> {
                 TileState.armedUntil = 0L
-                send("Climate") { KiaApi.startClimate(CONFIG) }
+                send("Climate") { KiaApi.startClimate(CONFIG.copy(climate = climateChoice())) }
             }
 
             // Unlock is the one action here you cannot take back in a car park,
@@ -245,6 +248,19 @@ class KiaTileService : TileService() {
                 }
             }
         }
+    }
+
+    /**
+     * What the phone last said the Climate button should send.
+     *
+     * Kept in this watch's own KiaSettings once read, so a phone that is out
+     * of range still gets its last choice honoured rather than the compiled-in
+     * preset - which is only what a watch that has never heard from the phone
+     * falls back to. Runs on the worker: the Data Layer read blocks.
+     */
+    private fun climateChoice(): ClimateSettings {
+        ClimateSync.pull(this)?.let { KiaSettings.saveClimate(this, it) }
+        return KiaSettings.climate(this)
     }
 
     private fun send(label: String, call: () -> ApiResult) {
@@ -551,6 +567,7 @@ class KiaTileService : TileService() {
         // The watch is a separate device with its own storage, so the phone's
         // Settings screen cannot reach it. Build-time config it is - see
         // local.properties.example. Changing hosts means rebuilding the tile.
+        // The climate choice is the exception; see climateChoice().
         val CONFIG = KiaConfig.fromBuildConfig()
 
         // Bumped whenever the drawables change, so the tile refetches them.

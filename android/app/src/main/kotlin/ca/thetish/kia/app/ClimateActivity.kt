@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.widget.ImageButton
 import android.widget.TextView
 import ca.thetish.kia.core.ClimateSettings
+import ca.thetish.kia.core.ClimateSync
 import ca.thetish.kia.core.KiaSettings
 import ca.thetish.kia.core.SeatHeat
 
@@ -91,6 +92,7 @@ class ClimateActivity : Activity() {
     private fun update(change: ClimateSettings.() -> ClimateSettings) {
         settings = settings.change().normalized()
         KiaSettings.saveClimate(this, settings)
+        ClimateSync.publish(this, settings)
         render()
     }
 

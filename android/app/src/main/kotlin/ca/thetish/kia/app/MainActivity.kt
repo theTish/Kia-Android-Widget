@@ -18,6 +18,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.net.toUri
 import ca.thetish.kia.core.ApiResult
+import ca.thetish.kia.core.ClimateSync
 import ca.thetish.kia.core.KiaApi
 import ca.thetish.kia.core.KiaSettings
 import ca.thetish.kia.core.UnlockGuard
@@ -80,6 +81,11 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // Also on every open, not only when Climate settings change: it covers
+        // a watch that was reinstalled, and a phone that updated from the
+        // preset build and has never published. Unchanged is a no-op.
+        ClimateSync.publish(this, KiaSettings.climate(this))
 
         status = findViewById(R.id.status)
         battery = findViewById(R.id.battery)
