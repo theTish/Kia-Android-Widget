@@ -111,6 +111,114 @@ def _reported_range(value):
         return value
 
 
+# ── Pre-conditioning ──
+# The two scheduled departures the car keeps, as (library prefix, raw key).
+# Kia names the second one "reserveChargeInfo2" - the extra "e" is theirs.
+_DEPARTURE_SLOTS = (("ev_first_departure", "reservChargeInfo"),
+                    ("ev_second_departure", "reserveChargeInfo2"))
+
+
+def _child(obj, *path):
+    """Walk nested dicts, returning None at the first missing step."""
+    for key in path:
+        if not isinstance(obj, dict):
+            return None
+        obj = obj.get(key)
+    return obj
+
+
+def _departure_time(raw, section):
+    """Kia's "0730" plus an AM/PM section, as a 24-hour "07:30".
+
+    The car sends a twelve-hour clock with timeSection 1 meaning PM, and
+    "0000" for a timer nobody has set - which is unknown, not midnight.
+    """
+    try:
+        text = str(raw).strip()
+        if not text or int(text) == 0:
+            return None
+        hour, minute = int(text[:-2] or 0), int(text[-2:])
+        if section is not None and int(section) == 1 and hour < 12:
+            hour += 12
+        elif section is not None and int(section) == 0 and hour == 12:
+            hour = 0
+        if hour > 23 or minute > 59:
+            return None
+        return f"{hour:02d}:{minute:02d}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _departure_days(days):
+    """Days as sorted ints, 0 = Sunday through 6 = Saturday, as Kia counts."""
+    if not isinstance(days, (list, tuple)):
+        return None
+    try:
+        return sorted({int(d) for d in days if 0 <= int(d) <= 6})
+    except (TypeError, ValueError):
+        return None
+
+
+def _departure_temperature(value, year):
+    """Decode a departure's hex climate code ("0EH") the way the library
+    decodes the live one, so both figures come from the same table."""
+    if not isinstance(value, str) or not value.endswith("H"):
+        return None
+    try:
+        from hyundai_kia_connect_api.KiaUvoApiCA import KiaUvoApiCA
+        table = (KiaUvoApiCA.temperature_range_c_new
+                 if (year or 0) >= KiaUvoApiCA.temperature_range_model_year
+                 else KiaUvoApiCA.temperature_range_c_old)
+        return table[int(value[:-1], 16)]
+    except (ImportError, IndexError, ValueError):
+        return None
+
+
+def _departures(vehicle):
+    """The car's scheduled departures, or None when it says nothing of them.
+
+    The library only decodes these for some regions. For Canada it decodes
+    none of them - KiaUvoApiCA never sets an ev_*_departure_* attribute - so
+    for this car they have to come out of the raw status the library keeps,
+    using the layout the library reads for Europe. Whatever the library does
+    set wins, so a library upgrade that learns Canada takes over by itself.
+
+    A slot the car reports nothing about is left out entirely, and no slots at
+    all is None rather than []: "no departures scheduled" is a claim, and a
+    car that did not answer has not made it.
+    """
+    evs = _child(getattr(vehicle, "data", None) or {}, "status", "evStatus", "reservChargeInfos") \
+        or _child(getattr(vehicle, "data", None) or {}, "vehicleStatus", "evStatus", "reservChargeInfos") \
+        or {}
+    out = []
+    for n, (prefix, raw_key) in enumerate(_DEPARTURE_SLOTS, start=1):
+        raw = _child(evs, raw_key, "reservChargeInfoDetail") or {}
+        fatc = raw.get("reservFatcSet") or {}
+        lib_time = getattr(vehicle, f"{prefix}_time", None)
+        slot = {
+            "slot": n,
+            "enabled": _bool(getattr(vehicle, f"{prefix}_enabled", None)
+                             if getattr(vehicle, f"{prefix}_enabled", None) is not None
+                             else raw.get("reservChargeSet")),
+            "time": lib_time.strftime("%H:%M") if lib_time is not None
+            else _departure_time(_child(raw, "reservInfo", "time", "time"),
+                                 _child(raw, "reservInfo", "time", "timeSection")),
+            "days": _departure_days(getattr(vehicle, f"{prefix}_days", None)
+                                    or _child(raw, "reservInfo", "day")),
+            "climate_on": _bool(getattr(vehicle, f"{prefix}_climate_enabled", None)
+                                if getattr(vehicle, f"{prefix}_climate_enabled", None) is not None
+                                else fatc.get("airCtrl")),
+            "climate_temperature": getattr(vehicle, f"{prefix}_climate_temperature", None)
+            or _departure_temperature(_child(fatc, "airTemp", "value"), vehicle.year),
+            "defrost": _bool(getattr(vehicle, f"{prefix}_climate_defrost", None)
+                             if getattr(vehicle, f"{prefix}_climate_defrost", None) is not None
+                             else fatc.get("defrost")),
+        }
+        if any(v is not None for k, v in slot.items() if k != "slot"):
+            out.append(slot)
+    return out or None
+
+
 # ── Environment Variables ──
 USERNAME = _trimmed_env('KIA_USERNAME')
 PASSWORD = _trimmed_env('KIA_PASSWORD')
@@ -821,6 +929,12 @@ def vehicle_status():
             "station": _int(vehicle.ev_estimated_station_charge_duration),
         },
         "battery_preconditioning": _bool(vehicle.ev_battery_precondition_enabled),
+        # battery_preconditioning above stays for older clients; this block is
+        # the fuller answer to "is the car set to get itself ready".
+        "preconditioning": {
+            "battery": _bool(vehicle.ev_battery_precondition_enabled),
+            "departures": _departures(vehicle),
+        },
         # The library has already mapped the raw unit code to a string
         # ("km"/"mi") when it set these, so they are passed through as-is.
         "range": {
@@ -1267,8 +1381,12 @@ def debug_vehicle():
     vehicle = get_cached_vehicle_state()
 
     # Access the raw private vehicle data
-    raw_data = getattr(vehicle, "_vehicle_data", {})
-    ev_status = raw_data.get("vehicleStatus", {}).get("evStatus", {})
+    # The library keeps the raw payload on vehicle.data - there is no
+    # _vehicle_data, which is why this used to return nothing. Canada files
+    # evStatus under "status", other regions under "vehicleStatus".
+    raw_data = getattr(vehicle, "data", None) or {}
+    ev_status = (_child(raw_data, "status", "evStatus")
+                 or _child(raw_data, "vehicleStatus", "evStatus") or {})
 
     logger.info(f"Found evStatus keys: {list(ev_status.keys())}")
 

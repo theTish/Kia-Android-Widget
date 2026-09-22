@@ -1,0 +1,366 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    What the Climate button sends. The two numbers first, as steppers with the
+    value large enough to read at arm's length, then the heaters as the same
+    segmented controls Settings uses. No Save: every tap is saved as made.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingTop="20dp"
+        android:paddingEnd="16dp">
+
+        <ImageButton
+            android:id="@+id/back"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/icon_button"
+            android:contentDescription="@string/back"
+            android:scaleType="center"
+            android:src="@drawable/ic_back"
+            android:tint="@color/text" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:fontFamily="@font/chakra_petch_semibold"
+            android:letterSpacing="0.04"
+            android:text="@string/climate_title"
+            android:textColor="@color/text"
+            android:textSize="22sp" />
+
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingStart="16dp"
+        android:paddingTop="20dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="24dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:layout_marginBottom="6dp"
+                android:lineSpacingExtra="4dp"
+                android:text="@string/climate_explainer"
+                android:textColor="@color/text_dim"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/card"
+                android:gravity="center_vertical"
+                android:paddingStart="18dp"
+                android:paddingTop="12dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="12dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/CardLabel"
+                        android:text="@string/climate_label_temperature" />
+
+                    <TextView
+                        android:id="@+id/temperature_value"
+                        style="@style/CardFigure"
+                        android:layout_marginTop="4dp"
+                        tools:text="21.5°" />
+
+                </LinearLayout>
+
+                <ImageButton
+                    android:id="@+id/temperature_down"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@drawable/icon_button"
+                    android:contentDescription="@string/climate_cooler"
+                    android:scaleType="center"
+                    android:src="@drawable/ic_minus"
+                    android:tint="@color/text" />
+
+                <ImageButton
+                    android:id="@+id/temperature_up"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@drawable/icon_button"
+                    android:contentDescription="@string/climate_warmer"
+                    android:scaleType="center"
+                    android:src="@drawable/ic_plus"
+                    android:tint="@color/text" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/card"
+                android:gravity="center_vertical"
+                android:paddingStart="18dp"
+                android:paddingTop="12dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="12dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/CardLabel"
+                        android:text="@string/climate_label_duration" />
+
+                    <TextView
+                        android:id="@+id/duration_value"
+                        style="@style/CardFigure"
+                        android:layout_marginTop="4dp"
+                        tools:text="10 min" />
+
+                </LinearLayout>
+
+                <ImageButton
+                    android:id="@+id/duration_down"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@drawable/icon_button"
+                    android:contentDescription="@string/climate_shorter"
+                    android:scaleType="center"
+                    android:src="@drawable/ic_minus"
+                    android:tint="@color/text" />
+
+                <ImageButton
+                    android:id="@+id/duration_up"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@drawable/icon_button"
+                    android:contentDescription="@string/climate_longer"
+                    android:scaleType="center"
+                    android:src="@drawable/ic_plus"
+                    android:tint="@color/text" />
+
+            </LinearLayout>
+
+            <TextView
+                style="@style/FieldLabel"
+                android:layout_marginTop="22dp"
+                android:text="@string/climate_label_defrost" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/segment_group"
+                android:padding="4dp">
+
+                <TextView
+                    android:id="@+id/defrost_off"
+                    style="@style/Segment"
+                    android:text="@string/seat_off" />
+
+                <TextView
+                    android:id="@+id/defrost_on"
+                    style="@style/Segment"
+                    android:text="@string/toggle_on" />
+
+            </LinearLayout>
+
+            <TextView
+                style="@style/FieldLabel"
+                android:layout_marginTop="22dp"
+                android:text="@string/climate_label_rear_heat" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/segment_group"
+                android:padding="4dp">
+
+                <TextView
+                    android:id="@+id/rear_heat_off"
+                    style="@style/Segment"
+                    android:text="@string/seat_off" />
+
+                <TextView
+                    android:id="@+id/rear_heat_on"
+                    style="@style/Segment"
+                    android:text="@string/toggle_on" />
+
+            </LinearLayout>
+
+            <TextView
+                style="@style/FieldLabel"
+                android:layout_marginTop="22dp"
+                android:text="@string/climate_label_wheel" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/segment_group"
+                android:padding="4dp">
+
+                <TextView
+                    android:id="@+id/wheel_off"
+                    style="@style/Segment"
+                    android:text="@string/seat_off" />
+
+                <TextView
+                    android:id="@+id/wheel_on"
+                    style="@style/Segment"
+                    android:text="@string/toggle_on" />
+
+            </LinearLayout>
+
+            <TextView
+                style="@style/FieldLabel"
+                android:layout_marginTop="22dp"
+                android:text="@string/climate_label_driver" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/segment_group"
+                android:padding="4dp">
+
+                <TextView
+                    android:id="@+id/driver_off"
+                    style="@style/Segment"
+                    android:text="@string/seat_off" />
+
+                <TextView
+                    android:id="@+id/driver_low"
+                    style="@style/Segment"
+                    android:text="@string/seat_low" />
+
+                <TextView
+                    android:id="@+id/driver_medium"
+                    style="@style/Segment"
+                    android:text="@string/seat_medium" />
+
+                <TextView
+                    android:id="@+id/driver_high"
+                    style="@style/Segment"
+                    android:text="@string/seat_high" />
+
+            </LinearLayout>
+
+            <TextView
+                style="@style/FieldLabel"
+                android:layout_marginTop="22dp"
+                android:text="@string/climate_label_passenger" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/segment_group"
+                android:padding="4dp">
+
+                <TextView
+                    android:id="@+id/passenger_off"
+                    style="@style/Segment"
+                    android:text="@string/seat_off" />
+
+                <TextView
+                    android:id="@+id/passenger_low"
+                    style="@style/Segment"
+                    android:text="@string/seat_low" />
+
+                <TextView
+                    android:id="@+id/passenger_medium"
+                    style="@style/Segment"
+                    android:text="@string/seat_medium" />
+
+                <TextView
+                    android:id="@+id/passenger_high"
+                    style="@style/Segment"
+                    android:text="@string/seat_high" />
+
+            </LinearLayout>
+
+            <TextView
+                style="@style/FieldLabel"
+                android:layout_marginTop="22dp"
+                android:text="@string/climate_label_rear_seats" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/segment_group"
+                android:padding="4dp">
+
+                <TextView
+                    android:id="@+id/rear_off"
+                    style="@style/Segment"
+                    android:text="@string/seat_off" />
+
+                <TextView
+                    android:id="@+id/rear_low"
+                    style="@style/Segment"
+                    android:text="@string/seat_low" />
+
+                <TextView
+                    android:id="@+id/rear_medium"
+                    style="@style/Segment"
+                    android:text="@string/seat_medium" />
+
+                <TextView
+                    android:id="@+id/rear_high"
+                    style="@style/Segment"
+                    android:text="@string/seat_high" />
+
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/climate_summary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginTop="26dp"
+                android:layout_marginEnd="4dp"
+                android:lineSpacingExtra="3dp"
+                android:textColor="@color/accent"
+                android:textSize="14sp"
+                tools:text="Sends 21° · 10 min · defrost · wheel heater · seats high" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginTop="14dp"
+                android:layout_marginEnd="4dp"
+                android:lineSpacingExtra="4dp"
+                android:text="@string/climate_footnote"
+                android:textColor="@color/text_muted"
+                android:textSize="13sp" />
+
+        </LinearLayout>
+    </ScrollView>
+
+</LinearLayout>

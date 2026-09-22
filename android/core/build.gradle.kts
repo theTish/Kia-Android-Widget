@@ -31,10 +31,12 @@ android {
             "\"${secret("KIA_BASE_URL", "https://kia-android-widget.vercel.app")}\"",
         )
         buildConfigField("String", "KIA_SECRET", "\"${secret("KIA_SECRET")}\"")
+        // Only the watch tile sends this - the phone picks its own climate
+        // settings. Empty means the plain default: 21 degrees, heaters off.
         buildConfigField(
             "String",
             "KIA_CLIMATE_PRESET",
-            "\"${secret("KIA_CLIMATE_PRESET", "winter")}\"",
+            "\"${secret("KIA_CLIMATE_PRESET")}\"",
         )
     }
 
@@ -52,4 +54,7 @@ dependencies {
     // The geofence decides whether to lock a car on its own. Its rules are
     // plain Kotlin precisely so they can be tested without a device.
     testImplementation("junit:junit:4.13.2")
+    // Android's org.json is a stub off-device; the real one lets the /status
+    // parser be tested against the payloads it is written for.
+    testImplementation("org.json:json:20240303")
 }

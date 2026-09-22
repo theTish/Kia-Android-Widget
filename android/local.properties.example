@@ -11,5 +11,7 @@ KIA_BASE_URL=https://kia.tishman.ca
 # The value of SECRET_KEY in your Vercel environment.
 KIA_SECRET=put-your-rotated-key-here
 
-# Which climate preset the Climate button sends: winter, summer or springfall.
+# What the watch tile's Climate button sends: winter, summer or springfall.
+# The phone ignores this - it has its own Climate screen - except as the
+# starting point for a fresh install. Leave it out for 21 degrees, heaters off.
 KIA_CLIMATE_PRESET=winter

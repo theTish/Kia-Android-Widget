@@ -60,10 +60,27 @@
     <string name="climate_temperature">%1$s°</string>
     <string name="climate_running">Running</string>
     <string name="climate_off">Off</string>
-    <string name="climate_preset">%1$s preset</string>
     <string name="climate_defrost">defrost</string>
     <string name="climate_wheel">wheel heater</string>
     <string name="climate_rear">rear heater</string>
+    <!-- The car's lowest climate step, which it names "Lo" rather than a temperature. -->
+    <string name="climate_lo">Lo</string>
+    <string name="precondition_line">Pre-conditioning: %1$s</string>
+    <string name="precondition_off">Pre-conditioning off</string>
+    <string name="precondition_departure">departure %1$s</string>
+    <string name="precondition_climate">climate %1$s</string>
+    <string name="precondition_battery_on">battery on</string>
+    <string name="precondition_battery_off">battery off</string>
+    <string name="days_daily">daily</string>
+    <string name="days_weekdays">weekdays</string>
+    <string name="days_weekends">weekends</string>
+    <string name="climate_minutes">%1$d min</string>
+    <!-- What the button will send, as against what the car says it is doing. -->
+    <string name="climate_sends">Sends %1$s</string>
+    <string name="climate_seats_all">seats %1$s</string>
+    <string name="climate_seat_driver">driver %1$s</string>
+    <string name="climate_seat_passenger">passenger %1$s</string>
+    <string name="climate_seat_rear">rear seats %1$s</string>
     <string name="engine_running">Engine running</string>
     <string name="opening_list">Open: %1$s</string>
 
@@ -85,10 +102,7 @@
     <string name="label_secret">API key</string>
     <string name="hint_secret">The SECRET_KEY your API expects</string>
     <string name="show_key">Show key</string>
-    <string name="label_preset">Climate preset</string>
-    <string name="preset_winter">Winter</string>
-    <string name="preset_summer">Summer</string>
-    <string name="preset_springfall">Spring/Fall</string>
+    <string name="label_climate">Climate button</string>
     <string name="label_widget_background">Widget background</string>
     <string name="background_glass">Glass</string>
     <string name="background_solid">Solid</string>
@@ -101,6 +115,28 @@
     <string name="save">Save</string>
     <string name="settings_saved">Saved</string>
     <string name="settings_footnote">The watch tile is a separate install on a separate device, so it keeps whatever was compiled into it and is not affected by these settings.</string>
+
+    <!-- Climate -->
+    <string name="climate_title">Climate</string>
+    <string name="climate_explainer">What the Climate button sends to the car — from this app and from the widget. Changes are saved as you make them.</string>
+    <string name="climate_label_temperature">Temperature</string>
+    <string name="climate_label_duration">Run for</string>
+    <string name="climate_label_defrost">Defrost</string>
+    <string name="climate_label_rear_heat">Rear window &amp; mirror heat</string>
+    <string name="climate_label_wheel">Heated steering wheel</string>
+    <string name="climate_label_driver">Driver seat</string>
+    <string name="climate_label_passenger">Passenger seat</string>
+    <string name="climate_label_rear_seats">Rear seats</string>
+    <string name="climate_cooler">Cooler</string>
+    <string name="climate_warmer">Warmer</string>
+    <string name="climate_shorter">Shorter</string>
+    <string name="climate_longer">Longer</string>
+    <string name="seat_off">Off</string>
+    <string name="seat_low">Low</string>
+    <string name="seat_medium">Med</string>
+    <string name="seat_high">High</string>
+    <string name="toggle_on">On</string>
+    <string name="climate_footnote">The watch tile cannot see these: it sends whatever KIA_CLIMATE_PRESET was set to when it was built.</string>
 
     <!-- Auto-lock -->
     <string name="geofence_title">Auto-lock</string>
@@ -120,8 +156,9 @@
     <string name="geofence_needs_background">Background location is not granted, so this can only run while the app is open — which is not when you walk away from the car. Android only allows it from Settings: tap here, then Permissions → Location → Allow all the time.</string>
     <string name="geofence_log">Decisions</string>
     <string name="geofence_clear">Clear</string>
-    <string name="geofence_empty">Nothing yet. Entries appear when you leave the ring — plain \"still inside\" checks are not recorded.</string>
+    <string name="geofence_empty">Nothing yet. An entry appears each time you leave the ring, including the ones where it decided to do nothing.</string>
     <string name="geofence_entry_when">%1$s · %2$s</string>
+    <string name="geofence_entry_hold">Did nothing: %1$s</string>
     <string name="geofence_entry_sent">Lock sent to the car</string>
     <string name="geofence_locked_title">EV6 locked</string>
     <string name="geofence_locked_text">Locked automatically — you were %1$d m away</string>

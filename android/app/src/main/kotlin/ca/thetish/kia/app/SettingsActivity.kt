@@ -48,8 +48,7 @@ class SettingsActivity : Activity() {
     private lateinit var result: TextView
     private lateinit var resultIcon: ImageView
 
-    private lateinit var presets: Segments
-    private lateinit var backgrounds: Segments
+    private lateinit var backgrounds: Segments<String>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,21 +65,19 @@ class SettingsActivity : Activity() {
         )
         baseUrl.setOnClickListener { baseUrl.showDropDown() }
 
-        presets = Segments(
-            KiaSettings.PRESETS.zip(
-                listOf(R.id.preset_winter, R.id.preset_summer, R.id.preset_springfall)
-            )
-        )
         backgrounds = Segments(
-            KiaSettings.BACKGROUNDS.zip(listOf(R.id.background_glass, R.id.background_solid))
+            this,
+            KiaSettings.BACKGROUNDS.zip(listOf(R.id.background_glass, R.id.background_solid)),
         )
 
         val current = KiaSettings.load(this)
         baseUrl.setText(current.baseUrl)
         secret.setText(current.secret)
-        presets.select(current.climatePreset)
         backgrounds.select(KiaSettings.widgetBackground(this))
 
+        findViewById<View>(R.id.climate).setOnClickListener {
+            startActivity(Intent(this, ClimateActivity::class.java))
+        }
         findViewById<View>(R.id.geofence).setOnClickListener {
             startActivity(Intent(this, GeofenceActivity::class.java))
         }
@@ -89,40 +86,6 @@ class SettingsActivity : Activity() {
         findViewById<ImageButton>(R.id.back).setOnClickListener { finish() }
         findViewById<TextView>(R.id.test).setOnClickListener { test() }
         findViewById<TextView>(R.id.save).setOnClickListener { save() }
-    }
-
-    /**
-     * A segmented control over a row of TextViews.
-     *
-     * Replaces the Spinner, which needed two custom layouts to stay visible on
-     * black and still hid three options behind a tap. Three fixed choices fit
-     * on one line, so show all three.
-     */
-    private inner class Segments(private val options: List<Pair<String, Int>>) {
-
-        private var chosen: String = options.first().first
-
-        init {
-            for ((value, id) in options) {
-                findViewById<TextView>(id).setOnClickListener { select(value) }
-            }
-        }
-
-        val value: String get() = chosen
-
-        fun select(value: String) {
-            chosen = options.firstOrNull { it.first == value }?.first ?: options.first().first
-            for ((option, id) in options) {
-                val selected = option == chosen
-                findViewById<TextView>(id).apply {
-                    setBackgroundResource(
-                        if (selected) R.drawable.segment_selected else R.drawable.segment_idle
-                    )
-                    setTextColor(getColor(if (selected) CoreR.color.text else CoreR.color.text_dim))
-                    isSelected = selected
-                }
-            }
-        }
     }
 
     private fun toggleReveal() {
@@ -139,7 +102,8 @@ class SettingsActivity : Activity() {
     private fun entered() = KiaConfig(
         baseUrl = baseUrl.text.toString().trim().trimEnd('/'),
         secret = secret.text.toString().trim(),
-        climatePreset = presets.value,
+        // Not edited on this screen; carried so the candidate is a whole config.
+        climate = KiaSettings.climate(this),
     )
 
     /**
@@ -192,7 +156,6 @@ class SettingsActivity : Activity() {
             context = this,
             baseUrl = entered.baseUrl,
             secret = entered.secret,
-            climatePreset = entered.climatePreset,
             widgetBackground = backgrounds.value,
         )
 
@@ -209,8 +172,10 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // Read on the way back rather than at create: the mode is changed on
-        // the screen this one launches.
+        // Read on the way back rather than at create: both are changed on
+        // the screens this one launches.
+        findViewById<TextView>(R.id.climate_summary).text =
+            ClimateSummary.describe(this, KiaSettings.climate(this), withDuration = true)
         findViewById<TextView>(R.id.geofence_summary).setText(
             when (KiaSettings.geofenceMode(this)) {
                 GeofenceMode.OFF -> R.string.geofence_summary_off

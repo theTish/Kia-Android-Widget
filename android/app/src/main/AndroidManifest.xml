@@ -45,6 +45,11 @@
             android:exported="false" />
 
         <activity
+            android:name=".ClimateActivity"
+            android:exported="false"
+            android:label="@string/climate_title" />
+
+        <activity
             android:name=".GeofenceActivity"
             android:exported="false"
             android:label="@string/geofence_title" />

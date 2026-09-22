@@ -118,6 +118,52 @@ check("zero total range is null", d["range"]["total"] is None, d["range"])
 check("unit survives", d["range"]["unit"] == "km", d["range"])
 check("battery untouched", d["battery_percentage"] == 72, d["battery_percentage"])
 
+print("\n--- pre-conditioning ---")
+# The library decodes no departure schedule for Canada, so the API reads them
+# out of the raw status. Absent must stay null: a car that did not answer has
+# not said "nothing scheduled".
+fake = reset()
+client.post("/status", headers=H)
+v = fake.vehicles["VID1"]
+v.ev_battery_precondition_enabled = 0
+app_mod.vehicle_state_cache["last_update"] = None
+d = client.post("/status", headers=H).get_json()
+check("preconditioning block present", "preconditioning" in d, d.keys())
+check("battery off", d["preconditioning"]["battery"] is False, d["preconditioning"])
+check("no departures reported -> null", d["preconditioning"]["departures"] is None, d["preconditioning"])
+check("legacy battery_preconditioning kept", d["battery_preconditioning"] is False)
+
+v.ev_battery_precondition_enabled = True
+v.data = {"status": {"evStatus": {"reservChargeInfos": {
+    "reservChargeInfo": {"reservChargeInfoDetail": {
+        "reservChargeSet": True,
+        "reservInfo": {"day": [1, 2, 3, 4, 5], "time": {"time": "0730", "timeSection": 0}},
+        "reservFatcSet": {"airCtrl": 1, "defrost": False,
+                          "airTemp": {"value": "0EH", "unit": 0}}}},
+    "reserveChargeInfo2": {"reservChargeInfoDetail": {
+        "reservChargeSet": False,
+        "reservInfo": {"day": [0, 6], "time": {"time": "0515", "timeSection": 1}},
+        "reservFatcSet": {"airCtrl": 0, "defrost": False,
+                          "airTemp": {"value": "00H", "unit": 0}}}},
+}}}}
+app_mod.vehicle_state_cache["last_update"] = None
+p = client.post("/status", headers=H).get_json()["preconditioning"]
+check("battery on", p["battery"] is True, p)
+check("two departures", p["departures"] and len(p["departures"]) == 2, p)
+one, two = (p["departures"] or [{}, {}])[:2]
+check("first enabled", one.get("enabled") is True, one)
+check("first 07:30", one.get("time") == "07:30", one)
+check("first weekdays", one.get("days") == [1, 2, 3, 4, 5], one)
+check("first climate on", one.get("climate_on") is True, one)
+check("first 0EH decodes to 21", one.get("climate_temperature") == 21.0, one)
+check("second disabled", two.get("enabled") is False, two)
+check("second PM -> 17:15", two.get("time") == "17:15", two)
+check("second weekend", two.get("days") == [0, 6], two)
+check("unset timer 0000 is null, not midnight", app_mod._departure_time("0000", 0) is None)
+check("12 AM is 00:xx", app_mod._departure_time("1205", 0) == "00:05")
+check("debug_vehicle reads the raw evStatus",
+      "reservChargeInfos" in client.post("/debug_vehicle", headers=H).get_json()["keys"])
+
 print("\n--- auth ---")
 reset()
 check("bad key 403", client.post("/status", headers={"Authorization":"nope"}).status_code == 403)
