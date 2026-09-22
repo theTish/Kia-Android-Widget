@@ -13,7 +13,7 @@ import android.content.Context
 data class KiaConfig(
     val baseUrl: String,
     val secret: String,
-    val climatePreset: String,
+    val climate: ClimateSettings,
 ) {
     val isUsable: Boolean get() = secret.isNotBlank() && baseUrl.isNotBlank()
 
@@ -22,7 +22,11 @@ data class KiaConfig(
         fun fromBuildConfig() = KiaConfig(
             baseUrl = BuildConfig.KIA_BASE_URL.trimEnd('/'),
             secret = BuildConfig.KIA_SECRET,
-            climatePreset = BuildConfig.KIA_CLIMATE_PRESET,
+            // The watch has nowhere to pick settings, so it sends what the old
+            // preset name in local.properties used to mean. Unset or unknown
+            // falls back to the plain default rather than failing the build.
+            climate = ClimateSettings.forPreset(BuildConfig.KIA_CLIMATE_PRESET)
+                ?: ClimateSettings.DEFAULT,
         )
     }
 }
@@ -43,7 +47,16 @@ object KiaSettings {
     private const val FILE = "kia_settings"
     private const val KEY_BASE_URL = "base_url"
     private const val KEY_SECRET = "secret"
-    private const val KEY_PRESET = "climate_preset"
+    // Read only to carry an old choice over; see climate().
+    private const val KEY_LEGACY_PRESET = "climate_preset"
+    private const val KEY_CLIMATE_TEMP = "climate_temp"
+    private const val KEY_CLIMATE_DURATION = "climate_duration"
+    private const val KEY_CLIMATE_DEFROST = "climate_defrost"
+    private const val KEY_CLIMATE_REAR_HEAT = "climate_rear_heat"
+    private const val KEY_CLIMATE_WHEEL = "climate_wheel"
+    private const val KEY_CLIMATE_DRIVER = "climate_driver_seat"
+    private const val KEY_CLIMATE_PASSENGER = "climate_passenger_seat"
+    private const val KEY_CLIMATE_REAR_SEATS = "climate_rear_seats"
     private const val KEY_WIDGET_BACKGROUND = "widget_background"
     private const val KEY_GEOFENCE_MODE = "geofence_mode"
     private const val KEY_GEOFENCE_RADIUS = "geofence_radius"
@@ -53,8 +66,6 @@ object KiaSettings {
         "https://kia.tishman.ca",
         "https://kia-android-widget.vercel.app",
     )
-
-    val PRESETS = listOf("winter", "summer", "springfall")
 
     /**
      * How the widget paints its card.
@@ -76,9 +87,63 @@ object KiaSettings {
                 ?.takeIf { it.isNotEmpty() } ?: defaults.baseUrl,
             secret = prefs.getString(KEY_SECRET, null)?.trim()
                 ?.takeIf { it.isNotEmpty() } ?: defaults.secret,
-            climatePreset = prefs.getString(KEY_PRESET, null)?.trim()
-                ?.takeIf { it.isNotEmpty() } ?: defaults.climatePreset,
+            climate = climate(context),
         )
+    }
+
+    /**
+     * What the Climate button sends.
+     *
+     * The first read after updating from the preset version seeds these from
+     * whatever that preset used to send - the stored choice, or failing that
+     * the build-time one, which is what a phone that never saved Settings was
+     * sending - and writes them straight back. Doing it once and dropping the
+     * old key means a later change to local.properties cannot quietly
+     * override what was chosen here.
+     */
+    fun climate(context: Context): ClimateSettings {
+        val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+
+        if (!prefs.contains(KEY_CLIMATE_TEMP)) {
+            val seeded = ClimateSettings.forPreset(prefs.getString(KEY_LEGACY_PRESET, null))
+                ?: KiaConfig.fromBuildConfig().climate
+            saveClimate(context, seeded)
+            return seeded.normalized()
+        }
+
+        val defaults = ClimateSettings.DEFAULT
+        return ClimateSettings(
+            temperature = prefs.getFloat(KEY_CLIMATE_TEMP, defaults.temperature.toFloat()).toDouble(),
+            durationMinutes = prefs.getInt(KEY_CLIMATE_DURATION, defaults.durationMinutes),
+            defrost = prefs.getBoolean(KEY_CLIMATE_DEFROST, defaults.defrost),
+            rearHeat = prefs.getBoolean(KEY_CLIMATE_REAR_HEAT, defaults.rearHeat),
+            steeringWheel = prefs.getBoolean(KEY_CLIMATE_WHEEL, defaults.steeringWheel),
+            driverSeat = SeatHeat.fromLevel(prefs.getInt(KEY_CLIMATE_DRIVER, 0)),
+            passengerSeat = SeatHeat.fromLevel(prefs.getInt(KEY_CLIMATE_PASSENGER, 0)),
+            rearSeats = SeatHeat.fromLevel(prefs.getInt(KEY_CLIMATE_REAR_SEATS, 0)),
+        ).normalized()
+    }
+
+    /**
+     * Saved on every change rather than behind Settings' Save button, like the
+     * auto-lock radius: each control is one tap, and losing seven of them to a
+     * Back press would be worse than there being no undo.
+     */
+    fun saveClimate(context: Context, settings: ClimateSettings) {
+        val s = settings.normalized()
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            // Half degrees are exact in a float, so nothing is lost here.
+            .putFloat(KEY_CLIMATE_TEMP, s.temperature.toFloat())
+            .putInt(KEY_CLIMATE_DURATION, s.durationMinutes)
+            .putBoolean(KEY_CLIMATE_DEFROST, s.defrost)
+            .putBoolean(KEY_CLIMATE_REAR_HEAT, s.rearHeat)
+            .putBoolean(KEY_CLIMATE_WHEEL, s.steeringWheel)
+            .putInt(KEY_CLIMATE_DRIVER, s.driverSeat.level)
+            .putInt(KEY_CLIMATE_PASSENGER, s.passengerSeat.level)
+            .putInt(KEY_CLIMATE_REAR_SEATS, s.rearSeats.level)
+            .remove(KEY_LEGACY_PRESET)
+            .apply()
     }
 
     /**
@@ -134,14 +199,12 @@ object KiaSettings {
         context: Context,
         baseUrl: String,
         secret: String,
-        climatePreset: String,
         widgetBackground: String,
     ) {
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_BASE_URL, baseUrl.trim().trimEnd('/'))
             .putString(KEY_SECRET, secret.trim())
-            .putString(KEY_PRESET, climatePreset.trim())
             .putString(KEY_WIDGET_BACKGROUND, widgetBackground)
             .apply()
     }
