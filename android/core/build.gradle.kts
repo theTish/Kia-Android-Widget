@@ -51,6 +51,9 @@ android {
 }
 
 dependencies {
+    // ClimateSync: the phone publishes its climate choice, the watch reads it.
+    implementation("com.google.android.gms:play-services-wearable:19.0.0")
+
     // The geofence decides whether to lock a car on its own. Its rules are
     // plain Kotlin precisely so they can be tested without a device.
     testImplementation("junit:junit:4.13.2")

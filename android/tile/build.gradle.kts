@@ -7,7 +7,9 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "ca.thetish.kiatile"
+        // The phone's package name, not its own: the Data Layer only connects
+        // apps that match on both ends, and ClimateSync needs it to.
+        applicationId = "ca.thetish.kia.app"
         // Wear OS 3.
         minSdk = 30
         targetSdk = 34
