@@ -13,13 +13,17 @@ import ca.thetish.kia.core.SeatHeat
  */
 object ClimateSummary {
 
-    fun describe(context: Context, settings: ClimateSettings, withDuration: Boolean): String {
+    fun describe(
+        context: Context,
+        settings: ClimateSettings,
+        withDuration: Boolean,
+        withTemperature: Boolean = true,
+    ): String {
         val s = settings.normalized()
-        val parts = mutableListOf(
-            context.getString(
-                R.string.climate_temperature,
-                ClimateSettings.formatTemperature(s.temperature),
-            )
+        val parts = mutableListOf<String>()
+        if (withTemperature) parts += context.getString(
+            R.string.climate_temperature,
+            ClimateSettings.formatTemperature(s.temperature),
         )
         if (withDuration) parts += context.getString(R.string.climate_minutes, s.durationMinutes)
         if (s.defrost) parts += context.getString(R.string.climate_defrost)

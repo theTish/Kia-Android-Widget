@@ -488,11 +488,19 @@
             android:layout_marginEnd="16dp"
             android:baselineAligned="false">
 
+            <!-- What the Climate button will send, and a way in to change it.
+                 Not the car's own readback: its target is usually "Lo" from
+                 the last time anyone touched the dial, which says nothing. -->
             <LinearLayout
+                android:id="@+id/climate_card"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:background="@drawable/card"
+                android:clickable="true"
+                android:contentDescription="@string/climate_card_description"
+                android:focusable="true"
+                android:foreground="?android:attr/selectableItemBackground"
                 android:orientation="vertical"
                 android:padding="18dp">
 
@@ -509,17 +517,7 @@
                 <TextView
                     android:id="@+id/climate_sub"
                     style="@style/CardFigureSub"
-                    tools:text="Off · Sends 21° · seats high" />
-
-                <!-- Its own line rather than part of climate_sub: it is a
-                     standing schedule, not what the climate is doing now. -->
-                <TextView
-                    android:id="@+id/climate_precondition"
-                    style="@style/CardFigureSub"
-                    android:layout_marginTop="4dp"
-                    android:visibility="gone"
-                    tools:text="Pre-conditioning: departure 7:30 weekdays"
-                    tools:visibility="visible" />
+                    tools:text="10 min · defrost · seats high" />
 
             </LinearLayout>
 
@@ -566,6 +564,37 @@
             android:paddingTop="6dp"
             android:paddingEnd="18dp"
             android:paddingBottom="6dp">
+
+            <!-- Tappable for the schedule itself; the row only says whether
+                 the car will get itself ready. -->
+            <LinearLayout
+                android:id="@+id/precondition_row"
+                style="@style/Row"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true">
+
+                <TextView
+                    style="@style/RowLabel"
+                    android:text="@string/row_precondition" />
+
+                <TextView
+                    android:id="@+id/precondition"
+                    style="@style/RowValue"
+                    tools:text="On" />
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_marginStart="8dp"
+                    android:contentDescription="@null"
+                    android:rotation="180"
+                    android:src="@drawable/ic_back"
+                    android:tint="@color/text_muted" />
+
+            </LinearLayout>
+
+            <View style="@style/RowDivider" />
 
             <LinearLayout style="@style/Row">
 
