@@ -28,8 +28,13 @@ object KiaApi {
 
     fun unlock(cfg: KiaConfig): ApiResult = command(cfg, "/unlock_car", null)
 
+    /**
+     * Sends the chosen settings field by field rather than a preset name, so
+     * the car gets exactly what was picked and the server has nothing to
+     * interpret.
+     */
     fun startClimate(cfg: KiaConfig): ApiResult =
-        command(cfg, "/start_climate", JSONObject().put("preset", cfg.climatePreset).toString())
+        command(cfg, "/start_climate", cfg.climate.toJson())
 
     /**
      * Reads /status.

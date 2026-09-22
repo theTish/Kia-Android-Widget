@@ -31,10 +31,12 @@ android {
             "\"${secret("KIA_BASE_URL", "https://kia-android-widget.vercel.app")}\"",
         )
         buildConfigField("String", "KIA_SECRET", "\"${secret("KIA_SECRET")}\"")
+        // Only the watch tile sends this - the phone picks its own climate
+        // settings. Empty means the plain default: 21 degrees, heaters off.
         buildConfigField(
             "String",
             "KIA_CLIMATE_PRESET",
-            "\"${secret("KIA_CLIMATE_PRESET", "winter")}\"",
+            "\"${secret("KIA_CLIMATE_PRESET")}\"",
         )
     }
 

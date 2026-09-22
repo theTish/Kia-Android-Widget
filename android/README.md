@@ -33,8 +33,14 @@ KIA_SECRET=<the current SECRET_KEY from your Vercel environment>
 KIA_CLIMATE_PRESET=winter
 ```
 
-`KIA_CLIMATE_PRESET` accepts `winter`, `summer` or `springfall`, matching
-`CLIMATE_PRESETS` in `api/index.py`.
+`KIA_CLIMATE_PRESET` accepts `winter`, `summer` or `springfall` and is optional.
+Only the watch tile uses it, because the watch has no settings screen: it sends
+the explicit fields that preset stands for (see `ClimateSettings.forPreset` in
+`:core`, which mirrors `CLIMATE_PRESETS` in `api/index.py`). The phone app and
+widget send whatever is chosen under **Settings > Climate button** instead -
+temperature, run time, defrost, rear window and mirror heat, steering wheel and
+each seat - and only read this value once, to seed that screen on a fresh
+install. Left out, both start at 21 °C for 10 minutes with every heater off.
 
 If `KIA_SECRET` is left empty everything still builds, and the clients report
 `No key in build` instead of calling anything.

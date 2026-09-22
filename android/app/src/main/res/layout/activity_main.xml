@@ -509,7 +509,7 @@
                 <TextView
                     android:id="@+id/climate_sub"
                     style="@style/CardFigureSub"
-                    tools:text="Off · winter preset" />
+                    tools:text="Off · Sends 21° · seats high" />
 
                 <!-- Its own line rather than part of climate_sub: it is a
                      standing schedule, not what the climate is doing now. -->
