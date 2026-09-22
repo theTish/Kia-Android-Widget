@@ -34,7 +34,19 @@ class GeofenceTest {
         fix: PhoneFix? = fixAt(400.0),
         state: GeofenceState = GeofenceState(),
         at: Long = now,
-    ) = Geofence.evaluate(at, car, locked, fix, state)
+        // A reading as fresh as the evaluation unless a test says otherwise:
+        // the age rules have their own cases below.
+        readingAt: Long? = at,
+        allowRefresh: Boolean = false,
+    ) = Geofence.evaluate(
+        now = at,
+        car = car,
+        carIsLocked = locked,
+        fix = fix,
+        state = state,
+        readingAt = readingAt,
+        allowRefresh = allowRefresh,
+    )
 
     // ── distance ──
 
@@ -196,7 +208,7 @@ class GeofenceTest {
         var t = now
 
         // Sitting in the car, unlocked.
-        var out = Geofence.evaluate(t, car(), false, fixAt(5.0, at = t), state)
+        var out = Geofence.evaluate(t, car(), false, fixAt(5.0, at = t), state, readingAt = t)
         assertTrue(out.decision is GeofenceDecision.Hold)
         state = out.state
 
@@ -205,7 +217,7 @@ class GeofenceTest {
         val seen = mutableListOf<GeofenceDecision>()
         for (d in distances) {
             t += step
-            out = Geofence.evaluate(t, car(), false, fixAt(d, at = t), state)
+            out = Geofence.evaluate(t, car(), false, fixAt(d, at = t), state, readingAt = t)
             state = out.state
             seen += out.decision
         }
@@ -213,5 +225,60 @@ class GeofenceTest {
         // Three fixes of waiting at 30s apart, then the 90s dwell is served.
         assertTrue(seen.take(3).all { it is GeofenceDecision.Waiting })
         assertTrue(seen.last() is GeofenceDecision.Lock)
+    }
+
+    // ── how old the lock reading is ──
+
+    @Test
+    fun `asks the car when the reading is too old to act on`() {
+        val decision = evaluate(
+            readingAt = now - 40 * 60 * 1000L,
+            allowRefresh = true,
+        ).decision
+        assertTrue(decision is GeofenceDecision.Refresh)
+        assertTrue(decision.reason.contains("40m old"))
+    }
+
+    @Test
+    fun `refuses rather than asks when the car parked long ago`() {
+        // Beyond the refresh window: an old reading about a car that has sat
+        // there for hours is not a walk-away in progress.
+        val parkedAt = now - 3 * 60 * 60 * 1000L
+        val decision = evaluate(
+            car = car(reportedAt = parkedAt),
+            readingAt = parkedAt,
+            allowRefresh = true,
+        ).decision
+        assertTrue(decision is GeofenceDecision.Hold)
+        assertTrue(decision.reason.contains("3h old"))
+    }
+
+    @Test
+    fun `refuses when the live reading comes back stale too`() {
+        val decision = evaluate(
+            readingAt = now - 40 * 60 * 1000L,
+            allowRefresh = false,
+        ).decision
+        assertTrue(decision is GeofenceDecision.Hold)
+    }
+
+    @Test
+    fun `refuses a reading with no timestamp at all`() {
+        val decision = evaluate(readingAt = null).decision
+        assertTrue(decision is GeofenceDecision.Hold)
+        assertTrue(decision.reason.contains("unknown age"))
+    }
+
+    @Test
+    fun `a stale reading standing next to the car is not worth a poll`() {
+        // The lock question is only asked once you are outside the ring, so
+        // this holds on distance without waking anything.
+        val decision = evaluate(
+            fix = fixAt(20.0),
+            readingAt = now - 40 * 60 * 1000L,
+            allowRefresh = true,
+        ).decision
+        assertTrue(decision is GeofenceDecision.Hold)
+        assertTrue(decision.reason.contains("ring"))
     }
 }

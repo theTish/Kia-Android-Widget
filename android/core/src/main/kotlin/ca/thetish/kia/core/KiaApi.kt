@@ -56,6 +56,15 @@ object KiaApi {
         return first
     }
 
+    /**
+     * Reads the car itself rather than Kia's cache.
+     *
+     * Wakes the modem, so it has one caller: the geofence, when it is about to
+     * decide whether a car standing somewhere you have walked away from is
+     * open, and the cached answer is too old to be that evidence.
+     */
+    fun statusLive(cfg: KiaConfig): StatusResult = statusOnce(cfg, force = true)
+
     private fun statusOnce(cfg: KiaConfig, force: Boolean): StatusResult {
         val body = if (force) JSONObject().put("force", true).toString() else null
         val (code, text, error) = request(cfg, "/status", body)
