@@ -29,6 +29,7 @@ import ca.thetish.kia.core.GeofenceDecision
 import ca.thetish.kia.core.GeofenceEntry
 import ca.thetish.kia.core.GeofenceLog
 import ca.thetish.kia.core.GeofenceMode
+import ca.thetish.kia.core.GeofenceOutcome
 import ca.thetish.kia.core.KiaApi
 import ca.thetish.kia.core.KiaSettings
 import ca.thetish.kia.core.PhoneFix
@@ -267,30 +268,28 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
             return Result.success()
         }
 
-        val status = withContext(Dispatchers.IO) { KiaApi.status(KiaSettings.load(app)) }.status
+        var status = withContext(Dispatchers.IO) { KiaApi.status(KiaSettings.load(app)) }.status
         val fix = currentFix()
 
-        val car = status?.let { s ->
-            val lat = s.latitude
-            val lon = s.longitude
-            if (lat != null && lon != null) {
-                CarPosition(lat, lon, positionReportedAt(s))
-            } else {
-                null
-            }
-        }
+        var outcome = evaluate(app, status, fix, allowRefresh = true)
 
-        val outcome = Geofence.evaluate(
-            now = System.currentTimeMillis(),
-            car = car,
-            carIsLocked = status?.isLocked,
-            fix = fix,
-            state = GeofenceLog.loadState(app),
-            radiusMetres = KiaSettings.geofenceRadius(app),
-        )
+        // Kia's cached answer was too old to decide on. Wake the car, and take
+        // whatever it says as final - a second stale answer is refused rather
+        // than chased.
+        if (outcome.decision is GeofenceDecision.Refresh) {
+            log(GeofenceEntry.OUTCOME_HOLD, outcome.decision.reason, acted = false)
+            status = withContext(Dispatchers.IO) { KiaApi.statusLive(KiaSettings.load(app)) }.status
+            Geofences.sync(app, status)
+            outcome = evaluate(app, status, fix, allowRefresh = false)
+        }
         GeofenceLog.saveState(app, outcome.state)
 
         when (val decision = outcome.decision) {
+            // Only reached when the live read came back stale too; the first
+            // Refresh was logged and handled above.
+            is GeofenceDecision.Refresh ->
+                log(GeofenceEntry.OUTCOME_HOLD, decision.reason, acted = false)
+
             is GeofenceDecision.Hold ->
                 log(GeofenceEntry.OUTCOME_HOLD, decision.reason, acted = false)
 
@@ -327,6 +326,30 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
         return Result.success()
     }
 
+    private fun evaluate(
+        app: Context,
+        status: VehicleStatus?,
+        fix: PhoneFix?,
+        allowRefresh: Boolean,
+    ): GeofenceOutcome {
+        val car = status?.let { s ->
+            val lat = s.latitude
+            val lon = s.longitude
+            if (lat != null && lon != null) CarPosition(lat, lon, positionReportedAt(s)) else null
+        }
+
+        return Geofence.evaluate(
+            now = System.currentTimeMillis(),
+            car = car,
+            carIsLocked = status?.isLocked,
+            fix = fix,
+            state = GeofenceLog.loadState(app),
+            radiusMetres = KiaSettings.geofenceRadius(app),
+            readingAt = status?.lastUpdated?.let { parseTime(it) },
+            allowRefresh = allowRefresh,
+        )
+    }
+
     /**
      * When the car reported this position, which is what the latch keys on.
      *
@@ -340,10 +363,13 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
      * dwell still has to be served either way.
      */
     private fun positionReportedAt(status: VehicleStatus): Long =
-        (status.locationUpdated ?: status.lastUpdated)
-            ?.let { runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }
-                .getOrNull() }
+        (status.locationUpdated ?: status.lastUpdated)?.let { parseTime(it) }
             ?: System.currentTimeMillis()
+
+    /** One of /status's ISO timestamps, or null if it is not one. */
+    private fun parseTime(iso: String): Long? = runCatching {
+        java.time.OffsetDateTime.parse(iso).toInstant().toEpochMilli()
+    }.getOrNull()
 
     @SuppressLint("MissingPermission") // checked in doWork before this is reached
     private suspend fun currentFix(): PhoneFix? = suspendCancellableCoroutine { cont ->

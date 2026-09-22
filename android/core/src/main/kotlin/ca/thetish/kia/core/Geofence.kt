@@ -52,6 +52,16 @@ sealed interface GeofenceDecision {
 
     /** Walked away from an unlocked car. */
     data class Lock(override val reason: String, val distanceMetres: Int) : GeofenceDecision
+
+    /**
+     * Outside the ring, but the lock reading is too old to act on.
+     *
+     * The caller is expected to ask the car itself and evaluate again. Kia
+     * serves a cached view that can be hours behind: on 2026-09-22 it reported
+     * a locked car two minutes before the owner locked it by hand, and this
+     * logged "already locked" about a car standing open.
+     */
+    data class Refresh(override val reason: String) : GeofenceDecision
 }
 
 /**
@@ -131,6 +141,34 @@ object Geofence {
      */
     const val MAX_CAR_POSITION_AGE_MS = 6 * 60 * 60 * 1000L
 
+    /**
+     * How old the lock reading may be before it is worth waking the car for.
+     *
+     * Kia answers /status from a cache the car refreshes when it feels like
+     * it, so "locked" can mean "was locked when the car last checked in".
+     * Five minutes is short enough that a reading this recent can only have
+     * come from the drive that just ended or a poll made for this decision.
+     */
+    const val MAX_READING_AGE_MS = 5 * 60 * 1000L
+
+    /**
+     * How long after the car parked a live poll is worth its cost.
+     *
+     * A forced poll wakes the car's modem and takes a little 12V, so it is not
+     * something to do every quarter of an hour all day while the car sits at
+     * work. Walking away from a car you have just parked happens within
+     * minutes of it reporting that position; past three quarters of an hour,
+     * an old reading is refused instead.
+     */
+    const val REFRESH_WINDOW_MS = 45 * 60 * 1000L
+
+    /**
+     * @param readingAt when the car reported the state this lock reading came
+     *   from, or null if it did not say.
+     * @param allowRefresh false once a live poll has already been made for
+     *   this decision, so a car that answers with a stale reading anyway is
+     *   refused rather than polled in a loop.
+     */
     fun evaluate(
         now: Long,
         car: CarPosition?,
@@ -139,6 +177,8 @@ object Geofence {
         state: GeofenceState,
         radiusMetres: Int = DEFAULT_RADIUS_METRES,
         dwellSeconds: Int = DEFAULT_DWELL_SECONDS,
+        readingAt: Long? = null,
+        allowRefresh: Boolean = false,
     ): GeofenceOutcome {
         // ── Reasons to do nothing at all ──
 
@@ -148,12 +188,6 @@ object Geofence {
         if (carAge > MAX_CAR_POSITION_AGE_MS) {
             return hold(state, "the car's position is ${hours(carAge)} old")
         }
-
-        // An unknown lock state is not an unlocked one. This is the single most
-        // important refusal here: it is what stops a failed /status from
-        // looking like an open car.
-        if (carIsLocked == null) return hold(state, "lock state unknown")
-        if (carIsLocked) return hold(state.inside(), "already locked")
 
         if (fix == null) return hold(state, "no position fix")
         if (fix.accuracyMetres > MAX_ACCURACY_METRES) {
@@ -178,6 +212,34 @@ object Geofence {
                 state,
             )
         }
+
+        // ── Is the car even open? ──
+        //
+        // Asked here rather than first because it is the expensive question:
+        // the answer that matters is a live one, and there is no point waking
+        // a car to learn the lock state of one you are standing next to.
+
+        // An unknown lock state is not an unlocked one. This is the single most
+        // important refusal here: it is what stops a failed /status from
+        // looking like an open car.
+        if (carIsLocked == null) return hold(state, "lock state unknown")
+
+        val readingAge = readingAt?.let { now - it }
+        if (readingAge == null || readingAge > MAX_READING_AGE_MS) {
+            val age = readingAge?.let { ago(it) } ?: "of unknown age"
+            return if (allowRefresh && carAge <= REFRESH_WINDOW_MS) {
+                GeofenceOutcome(
+                    GeofenceDecision.Refresh("the lock reading is $age - asking the car"),
+                    state,
+                )
+            } else {
+                hold(state, "the lock reading is $age")
+            }
+        }
+
+        // Locked resets the dwell: the walk this clock was timing ended with
+        // the car shut, so the next one starts from scratch.
+        if (carIsLocked) return hold(state.inside(), "already locked")
 
         // ── Outside, and it counts ──
 
@@ -224,6 +286,9 @@ object Geofence {
 
     /** Back within the ring: the dwell timer starts again from scratch next time. */
     private fun GeofenceState.inside() = copy(outsideSince = 0L)
+
+    /** "12m old", "2h old" - the age of a reading, in the largest unit that reads plainly. */
+    private fun ago(millis: Long): String = "${hours(millis)} old"
 
     private fun hours(millis: Long): String {
         val h = millis / (60 * 60 * 1000L)
