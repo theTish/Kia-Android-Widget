@@ -259,7 +259,13 @@ class GeofenceActivity : Activity() {
         }
 
         val body = TextView(this).apply {
-            text = entry.reason
+            // A bare "already locked" reads like a status line rather than a
+            // decision, so holds say what they decided.
+            text = if (entry.outcome == GeofenceEntry.OUTCOME_HOLD) {
+                getString(R.string.geofence_entry_hold, entry.reason)
+            } else {
+                entry.reason
+            }
             // Amber for anything that reached a lock decision - acted on or
             // not, those are the lines worth reading twice.
             setTextColor(

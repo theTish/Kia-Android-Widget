@@ -28,8 +28,7 @@ data class GeofenceEntry(
  * This is the whole point of shadow mode. A geofence that locks your car is
  * only worth switching on once you have looked at a fortnight of what it would
  * have done and found nothing surprising in it - and "nothing surprising"
- * cannot be judged from memory, so every decision that is not a plain hold gets
- * written down.
+ * cannot be judged from memory, so every decision gets written down.
  *
  * SharedPreferences holding a JSON array rather than a database: it is a
  * hundred rows read all at once by one screen, and a Room dependency to store
@@ -46,12 +45,13 @@ object GeofenceLog {
     /**
      * Records a decision, newest first.
      *
-     * Plain holds are dropped: "inside the ring" is true nearly every time this
-     * runs, and a log of it would bury the handful of lines worth reading.
+     * Holds included. This only runs when Play Services reports you leaving the
+     * car, so there are a few a day rather than one a minute, and they are the
+     * lines that matter most: dropping them left an exit from a locked car -
+     * the ordinary case, and the correct answer - looking exactly like the
+     * feature never having run at all.
      */
     fun append(context: Context, entry: GeofenceEntry) {
-        if (entry.outcome == GeofenceEntry.OUTCOME_HOLD && !entry.acted) return
-
         val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
         val entries = read(context).toMutableList()
         entries.add(0, entry)
