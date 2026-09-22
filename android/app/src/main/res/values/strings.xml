@@ -65,12 +65,19 @@
     <string name="climate_rear">rear heater</string>
     <!-- The car's lowest climate step, which it names "Lo" rather than a temperature. -->
     <string name="climate_lo">Lo</string>
-    <string name="precondition_line">Pre-conditioning: %1$s</string>
-    <string name="precondition_off">Pre-conditioning off</string>
-    <string name="precondition_departure">departure %1$s</string>
-    <string name="precondition_climate">climate %1$s</string>
-    <string name="precondition_battery_on">battery on</string>
-    <string name="precondition_battery_off">battery off</string>
+    <string name="climate_card_description">Climate button settings</string>
+    <string name="row_precondition">Pre-conditioning</string>
+    <string name="state_on">On</string>
+    <string name="state_off">Off</string>
+    <string name="precondition_title">Pre-conditioning</string>
+    <string name="precondition_departure_n">Departure %1$d</string>
+    <string name="precondition_battery">Battery warming</string>
+    <string name="precondition_battery_detail">Warms the battery before a departure, for faster charging and range in the cold</string>
+    <string name="precondition_climate">Climate %1$s</string>
+    <string name="precondition_climate_off">Climate off</string>
+    <string name="precondition_none">The car did not report a schedule.</string>
+    <string name="precondition_footnote">Set in the Kia Connect app or in the car. This only reads it.</string>
+    <string name="precondition_close">Close</string>
     <string name="days_daily">daily</string>
     <string name="days_weekdays">weekdays</string>
     <string name="days_weekends">weekends</string>
@@ -136,7 +143,7 @@
     <string name="seat_medium">Med</string>
     <string name="seat_high">High</string>
     <string name="toggle_on">On</string>
-    <string name="climate_footnote">The watch tile cannot see these: it sends whatever KIA_CLIMATE_PRESET was set to when it was built.</string>
+    <string name="climate_footnote">The watch tile sends these too, once it has been in range of this phone since the last change.</string>
 
     <!-- Auto-lock -->
     <string name="geofence_title">Auto-lock</string>

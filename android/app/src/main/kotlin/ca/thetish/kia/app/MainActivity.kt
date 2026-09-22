@@ -1,6 +1,7 @@
 package ca.thetish.kia.app
 
 import android.app.Activity
+import android.app.Dialog
 import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
@@ -12,12 +13,14 @@ import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.view.View
+import android.view.WindowManager
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.net.toUri
 import ca.thetish.kia.core.ApiResult
+import ca.thetish.kia.core.ClimateSettings
 import ca.thetish.kia.core.ClimateSync
 import ca.thetish.kia.core.KiaApi
 import ca.thetish.kia.core.KiaSettings
@@ -107,6 +110,11 @@ class MainActivity : Activity() {
 
         lockButton.setOnClickListener { send(R.string.lock) { KiaApi.lock(KiaSettings.load(this)) } }
 
+        findViewById<View>(R.id.climate_card).setOnClickListener {
+            startActivity(Intent(this, ClimateActivity::class.java))
+        }
+        findViewById<View>(R.id.precondition_row).setOnClickListener { showSchedule() }
+
         climateButton.setOnClickListener {
             send(R.string.climate) { KiaApi.startClimate(KiaSettings.load(this)) }
         }
@@ -138,6 +146,7 @@ class MainActivity : Activity() {
             return
         }
         setButtonsEnabled(true)
+        renderClimate(latest)
         refresh()
     }
 
@@ -320,31 +329,7 @@ class MainActivity : Activity() {
         findViewById<TextView>(R.id.dc_limit).text = percentOrDash(s.chargeLimitDc)
         findViewById<TextView>(R.id.battery_12v).text = percentOrDash(s.battery12v)
 
-        findViewById<TextView>(R.id.climate_value).text = s.setTemperature
-            ?.let { climateTemperature(it) }
-            ?: getString(R.string.no_value)
-
-        findViewById<TextView>(R.id.climate_sub).text = buildList {
-            when (s.climateOn) {
-                true -> add(getString(R.string.climate_running))
-                false -> add(getString(R.string.climate_off))
-                null -> {}
-            }
-            if (s.defrostOn == true) add(getString(R.string.climate_defrost))
-            if (s.steeringWheelHeaterOn == true) add(getString(R.string.climate_wheel))
-            if (s.rearWindowHeaterOn == true) add(getString(R.string.climate_rear))
-            add(
-                getString(
-                    R.string.climate_sends,
-                    ClimateSummary.describe(
-                        this@MainActivity,
-                        KiaSettings.climate(this@MainActivity),
-                        withDuration = false,
-                    ),
-                )
-            )
-        }.joinToString(" · ")
-
+        renderClimate(s)
         renderPreconditioning(s)
 
         renderService(s)
@@ -417,43 +402,142 @@ class MainActivity : Activity() {
     private fun percentOrDash(value: Int?): String =
         value?.let { getString(R.string.percent_value, it) } ?: getString(R.string.no_value)
 
-    /** 21.0 -> "21", 21.5 -> "21.5". A whole number should not carry a ".0". */
-    /** A climate target as the car would show it, "Lo" included. */
-    private fun climateTemperature(value: Double): String =
-        if (value <= VehicleStatus.LO_CELSIUS) getString(R.string.climate_lo)
-        else getString(R.string.climate_temperature, trimDecimal(value))
-
     /**
-     * Whether the car is set to get itself ready: scheduled departures and
-     * battery warming.
+     * What the Climate button will send, rather than what the car last said.
      *
-     * Said only as far as the car said it. With nothing reported the line is
-     * hidden rather than "off", and "off" outright needs both halves known -
-     * a battery that is not warming says nothing about a departure timer.
+     * The car's own readback was this card's figure until it turned out to be
+     * "Lo" nearly all the time - the dial's position from whoever last sat in
+     * the car, which predicts nothing. The one live fact worth keeping is
+     * whether climate is running now, so that leads the line when it is.
+     *
+     * Called on resume as well as after a refresh, so coming back from the
+     * Climate screen shows the change without waiting on the network.
      */
-    private fun renderPreconditioning(s: VehicleStatus) {
-        val view = findViewById<TextView>(R.id.climate_precondition)
-        val departures = s.departures
-        val active = departures.orEmpty().filter { it.enabled == true }.map { departure(it) }
-        val battery = s.batteryPreconditioning
-
-        val text = when {
-            active.isNotEmpty() || battery == true -> getString(
-                R.string.precondition_line,
-                (active + listOfNotNull(
-                    if (battery == true) getString(R.string.precondition_battery_on) else null
-                )).joinToString(" · "),
-            )
-            battery == false && departures != null -> getString(R.string.precondition_off)
-            battery == false ->
-                getString(R.string.precondition_line, getString(R.string.precondition_battery_off))
-            else -> null
-        }
-        view.text = text
-        view.visibility = if (text == null) View.GONE else View.VISIBLE
+    private fun renderClimate(s: VehicleStatus?) {
+        val settings = KiaSettings.climate(this)
+        findViewById<TextView>(R.id.climate_value).text = getString(
+            R.string.climate_temperature,
+            ClimateSettings.formatTemperature(settings.temperature),
+        )
+        findViewById<TextView>(R.id.climate_sub).text = listOfNotNull(
+            if (s?.climateOn == true) getString(R.string.climate_running) else null,
+            ClimateSummary.describe(this, settings, withDuration = true, withTemperature = false),
+        ).joinToString(" · ")
     }
 
-    private fun departure(d: VehicleStatus.Departure): String {
+    /**
+     * On when the car will get itself ready - a departure timer or battery
+     * warming - and Off only when it said enough to be sure: a battery that is
+     * not warming says nothing about a departure timer. Anything less is "Not
+     * reported" rather than a guess.
+     */
+    private fun renderPreconditioning(s: VehicleStatus) {
+        val view = findViewById<TextView>(R.id.precondition)
+        val departures = s.departures
+        val battery = s.batteryPreconditioning
+        val on = departures.orEmpty().any { it.enabled == true } || battery == true
+
+        when {
+            on -> {
+                view.setText(R.string.state_on)
+                view.setTextColor(getColor(CoreR.color.accent))
+            }
+
+            departures != null && battery != null -> {
+                view.setText(R.string.state_off)
+                view.setTextColor(getColor(CoreR.color.text))
+            }
+
+            else -> {
+                view.setText(R.string.not_reported)
+                view.setTextColor(getColor(CoreR.color.text_muted))
+            }
+        }
+    }
+
+    /**
+     * The schedule behind the row, read-only.
+     *
+     * A dialog rather than a screen: it is two timers and a switch, and the
+     * status it describes is already in hand here - a screen would have to be
+     * handed it or fetch it again. Editing stays in Kia's own app; writing
+     * timers back is a command to the car, and nothing on this phone needs to
+     * own that.
+     */
+    private fun showSchedule() {
+        val s = latest ?: return
+        val view = layoutInflater.inflate(R.layout.dialog_precondition, null)
+        val list = view.findViewById<LinearLayout>(R.id.precondition_list)
+
+        val rows = s.departures.orEmpty().sortedBy { it.slot }.map { d ->
+            Triple(getString(R.string.precondition_departure_n, d.slot), d.enabled, departureDetail(d))
+        } + listOfNotNull(
+            s.batteryPreconditioning?.let {
+                Triple(
+                    getString(R.string.precondition_battery),
+                    it,
+                    getString(R.string.precondition_battery_detail),
+                )
+            }
+        )
+
+        if (rows.isEmpty()) {
+            view.findViewById<View>(R.id.precondition_none).visibility = View.VISIBLE
+        }
+        for ((index, row) in rows.withIndex()) {
+            if (index > 0) list.addView(View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1))
+                setBackgroundColor(getColor(CoreR.color.divider))
+            })
+            list.addView(scheduleRow(row.first, row.second, row.third))
+        }
+
+        val dialog = Dialog(this)
+        dialog.setContentView(view)
+        dialog.window?.apply {
+            setBackgroundDrawableResource(android.R.color.transparent)
+            setLayout(
+                (resources.displayMetrics.widthPixels * 0.9f).toInt(),
+                WindowManager.LayoutParams.WRAP_CONTENT,
+            )
+        }
+        view.findViewById<View>(R.id.precondition_close).setOnClickListener { dialog.dismiss() }
+        dialog.show()
+    }
+
+    private fun scheduleRow(title: String, enabled: Boolean?, detail: String?): View {
+        val row = layoutInflater.inflate(R.layout.row_precondition, null)
+        row.findViewById<TextView>(R.id.title).text = title
+        row.findViewById<TextView>(R.id.state).apply {
+            when (enabled) {
+                true -> {
+                    setText(R.string.state_on)
+                    setTextColor(getColor(CoreR.color.accent))
+                }
+
+                false -> {
+                    setText(R.string.state_off)
+                    setTextColor(getColor(CoreR.color.text_dim))
+                }
+
+                null -> {
+                    setText(R.string.not_reported)
+                    setTextColor(getColor(CoreR.color.text_muted))
+                }
+            }
+        }
+        row.findViewById<TextView>(R.id.detail).apply {
+            text = detail
+            visibility = if (detail.isNullOrEmpty()) View.GONE else View.VISIBLE
+            // An off timer still shows what it is set to, but should not read
+            // as though it will happen.
+            setTextColor(getColor(if (enabled == true) CoreR.color.text_dim else CoreR.color.text_muted))
+        }
+        return row
+    }
+
+    /** "7:40 a.m. · weekdays" over "Climate 22°", in the phone's own 12/24-hour style. */
+    private fun departureDetail(d: VehicleStatus.Departure): String {
         val time = d.time?.let {
             runCatching {
                 LocalTime.parse(it).format(
@@ -471,16 +555,28 @@ class MainActivity : Activity() {
             VehicleStatus.Departure.Days.OTHER -> d.days.orEmpty().joinToString(", ") {
                 DayOfWeek.of(if (it == 0) 7 else it).getDisplayName(TextStyle.SHORT, Locale.getDefault())
             }
+
             null -> null
         }
-        val climate = if (d.climateOn == true) {
-            d.climateTemperature?.let { getString(R.string.precondition_climate, climateTemperature(it)) }
-        } else null
-        return getString(
-            R.string.precondition_departure,
-            listOfNotNull(time, days).joinToString(" "),
-        ).trim() + (climate?.let { " · $it" } ?: "")
+        val climate = when (d.climateOn) {
+            true -> getString(
+                R.string.precondition_climate,
+                d.climateTemperature?.let { t ->
+                    if (t <= VehicleStatus.LO_CELSIUS) getString(R.string.climate_lo)
+                    else getString(R.string.climate_temperature, trimDecimal(t))
+                }.orEmpty(),
+            ).trim()
+
+            false -> getString(R.string.precondition_climate_off)
+            null -> null
+        }
+        return listOfNotNull(
+            listOfNotNull(time, days).joinToString(" · ").ifEmpty { null },
+            climate,
+        ).joinToString("\n")
     }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun trimDecimal(value: Double): String =
         if (value == value.toInt().toDouble()) value.toInt().toString() else value.toString()
