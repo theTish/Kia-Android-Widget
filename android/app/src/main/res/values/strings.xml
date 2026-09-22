@@ -64,6 +64,17 @@
     <string name="climate_defrost">defrost</string>
     <string name="climate_wheel">wheel heater</string>
     <string name="climate_rear">rear heater</string>
+    <!-- The car's lowest climate step, which it names "Lo" rather than a temperature. -->
+    <string name="climate_lo">Lo</string>
+    <string name="precondition_line">Pre-conditioning: %1$s</string>
+    <string name="precondition_off">Pre-conditioning off</string>
+    <string name="precondition_departure">departure %1$s</string>
+    <string name="precondition_climate">climate %1$s</string>
+    <string name="precondition_battery_on">battery on</string>
+    <string name="precondition_battery_off">battery off</string>
+    <string name="days_daily">daily</string>
+    <string name="days_weekdays">weekdays</string>
+    <string name="days_weekends">weekends</string>
     <string name="engine_running">Engine running</string>
     <string name="opening_list">Open: %1$s</string>
 

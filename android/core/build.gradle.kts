@@ -52,4 +52,7 @@ dependencies {
     // The geofence decides whether to lock a car on its own. Its rules are
     // plain Kotlin precisely so they can be tested without a device.
     testImplementation("junit:junit:4.13.2")
+    // Android's org.json is a stub off-device; the real one lets the /status
+    // parser be tested against the payloads it is written for.
+    testImplementation("org.json:json:20240303")
 }

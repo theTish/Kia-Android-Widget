@@ -25,8 +25,13 @@ import ca.thetish.kia.core.VehicleStatus
 import ca.thetish.kia.core.R as CoreR
 import java.text.DateFormat
 import java.text.NumberFormat
+import java.time.DayOfWeek
+import java.time.LocalTime
 import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executors
 
 /**
@@ -310,7 +315,7 @@ class MainActivity : Activity() {
         findViewById<TextView>(R.id.battery_12v).text = percentOrDash(s.battery12v)
 
         findViewById<TextView>(R.id.climate_value).text = s.setTemperature
-            ?.let { getString(R.string.climate_temperature, trimDecimal(it)) }
+            ?.let { climateTemperature(it) }
             ?: getString(R.string.no_value)
 
         findViewById<TextView>(R.id.climate_sub).text = buildList {
@@ -324,6 +329,8 @@ class MainActivity : Activity() {
             if (s.rearWindowHeaterOn == true) add(getString(R.string.climate_rear))
             add(getString(R.string.climate_preset, KiaSettings.load(this@MainActivity).climatePreset))
         }.joinToString(" · ")
+
+        renderPreconditioning(s)
 
         renderService(s)
 
@@ -396,6 +403,70 @@ class MainActivity : Activity() {
         value?.let { getString(R.string.percent_value, it) } ?: getString(R.string.no_value)
 
     /** 21.0 -> "21", 21.5 -> "21.5". A whole number should not carry a ".0". */
+    /** A climate target as the car would show it, "Lo" included. */
+    private fun climateTemperature(value: Double): String =
+        if (value <= VehicleStatus.LO_CELSIUS) getString(R.string.climate_lo)
+        else getString(R.string.climate_temperature, trimDecimal(value))
+
+    /**
+     * Whether the car is set to get itself ready: scheduled departures and
+     * battery warming.
+     *
+     * Said only as far as the car said it. With nothing reported the line is
+     * hidden rather than "off", and "off" outright needs both halves known -
+     * a battery that is not warming says nothing about a departure timer.
+     */
+    private fun renderPreconditioning(s: VehicleStatus) {
+        val view = findViewById<TextView>(R.id.climate_precondition)
+        val departures = s.departures
+        val active = departures.orEmpty().filter { it.enabled == true }.map { departure(it) }
+        val battery = s.batteryPreconditioning
+
+        val text = when {
+            active.isNotEmpty() || battery == true -> getString(
+                R.string.precondition_line,
+                (active + listOfNotNull(
+                    if (battery == true) getString(R.string.precondition_battery_on) else null
+                )).joinToString(" · "),
+            )
+            battery == false && departures != null -> getString(R.string.precondition_off)
+            battery == false ->
+                getString(R.string.precondition_line, getString(R.string.precondition_battery_off))
+            else -> null
+        }
+        view.text = text
+        view.visibility = if (text == null) View.GONE else View.VISIBLE
+    }
+
+    private fun departure(d: VehicleStatus.Departure): String {
+        val time = d.time?.let {
+            runCatching {
+                LocalTime.parse(it).format(
+                    DateTimeFormatter.ofPattern(
+                        if (android.text.format.DateFormat.is24HourFormat(this)) "H:mm" else "h:mm a"
+                    )
+                )
+            }.getOrNull()
+        }
+        val days = when (d.dayPattern) {
+            VehicleStatus.Departure.Days.DAILY -> getString(R.string.days_daily)
+            VehicleStatus.Departure.Days.WEEKDAYS -> getString(R.string.days_weekdays)
+            VehicleStatus.Departure.Days.WEEKENDS -> getString(R.string.days_weekends)
+            // Kia counts from Sunday = 0; java.time from Monday = 1.
+            VehicleStatus.Departure.Days.OTHER -> d.days.orEmpty().joinToString(", ") {
+                DayOfWeek.of(if (it == 0) 7 else it).getDisplayName(TextStyle.SHORT, Locale.getDefault())
+            }
+            null -> null
+        }
+        val climate = if (d.climateOn == true) {
+            d.climateTemperature?.let { getString(R.string.precondition_climate, climateTemperature(it)) }
+        } else null
+        return getString(
+            R.string.precondition_departure,
+            listOfNotNull(time, days).joinToString(" "),
+        ).trim() + (climate?.let { " · $it" } ?: "")
+    }
+
     private fun trimDecimal(value: Double): String =
         if (value == value.toInt().toDouble()) value.toInt().toString() else value.toString()
 
