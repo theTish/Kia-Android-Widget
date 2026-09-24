@@ -279,9 +279,7 @@ class MainActivity : Activity() {
         batteryBar.show(s.batteryPercent, s.chargeLimitAc)
 
         chargeState.text = when {
-            s.isCharging -> s.chargeRemainingText
-                ?.let { getString(R.string.charge_charging_left, it) }
-                ?: getString(R.string.charge_charging)
+            s.isCharging -> chargingLine(s)
 
             s.pluggedIn -> s.plugType
                 ?.let { getString(R.string.charge_plugged_type, it) }
@@ -322,6 +320,26 @@ class MainActivity : Activity() {
         lockChipText.setTextColor(
             getColor(if (locked == null) CoreR.color.text_muted else CoreR.color.text)
         )
+    }
+
+    /**
+     * "Charging · 6.6 kW · 2h 10m left", with whichever halves the car gave.
+     *
+     * Both come from the same estimate of how long is left, so they appear and
+     * vanish together in practice; they are handled separately anyway because a
+     * line reading "Charging · left" would be worse than one reading "Charging".
+     */
+    private fun chargingLine(s: VehicleStatus): String {
+        val power = s.chargingPowerText
+        val left = s.chargeRemainingText
+        return when {
+            power != null && left != null ->
+                getString(R.string.charge_charging_power_left, power, left)
+
+            power != null -> getString(R.string.charge_charging_power, power)
+            left != null -> getString(R.string.charge_charging_left, left)
+            else -> getString(R.string.charge_charging)
+        }
     }
 
     private fun renderAttention(s: VehicleStatus) {

@@ -139,6 +139,7 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
         set(Keys.range, status.range)
         set(Keys.locked, status.isLocked)
         set(Keys.chargeRemaining, status.chargeRemainingText)
+        set(Keys.chargePower, status.chargingPowerText)
         set(Keys.chargeLimitAc, status.chargeLimitAc)
 
         this[Keys.charging] = status.isCharging
