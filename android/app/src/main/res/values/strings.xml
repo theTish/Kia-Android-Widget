@@ -53,6 +53,16 @@
     <string name="section_service">Service</string>
     <string name="metric_ac_limit">AC limit</string>
     <string name="metric_dc_limit">DC limit</string>
+    <string name="charge_limit_tap">Tap a limit to change it</string>
+    <!-- The charge limit picker -->
+    <string name="charge_limit_action">Charge limit</string>
+    <string name="charge_limit_title_ac">AC charge limit</string>
+    <string name="charge_limit_title_dc">DC charge limit</string>
+    <string name="charge_limit_hint">50–100%, in steps of 10. The car uses it the next time it charges on this kind of plug.</string>
+    <string name="charge_limit_lower">Lower</string>
+    <string name="charge_limit_higher">Higher</string>
+    <string name="charge_limit_set">Set</string>
+    <string name="charge_limit_cancel">Cancel</string>
     <string name="metric_12v">12V battery</string>
     <string name="service_sub">km to next service</string>
     <string name="service_due">Due</string>

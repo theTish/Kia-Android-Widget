@@ -37,6 +37,22 @@ object KiaApi {
         command(cfg, "/start_climate", cfg.climate.toJson())
 
     /**
+     * Sets the AC and/or DC charge limit.
+     *
+     * Only the limit being changed is sent; the API fills the other in from
+     * the car's current value, so changing AC cannot quietly rewrite DC with
+     * whatever this phone last saw. Values must be on ChargeLimits.STEPS - the
+     * API 400s anything else, and the picker only offers those.
+     */
+    fun setChargeLimits(cfg: KiaConfig, ac: Int? = null, dc: Int? = null): ApiResult {
+        require(ac != null || dc != null) { "one limit is required" }
+        val body = JSONObject()
+        if (ac != null) body.put("ac", ac)
+        if (dc != null) body.put("dc", dc)
+        return command(cfg, "/set_charge_limits", body.toString())
+    }
+
+    /**
      * Reads /status.
      *
      * Kia's cached view of the car sometimes answers with no EV data at all -

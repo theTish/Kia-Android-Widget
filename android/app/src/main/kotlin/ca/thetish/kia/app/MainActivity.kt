@@ -20,6 +20,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.net.toUri
 import ca.thetish.kia.core.ApiResult
+import ca.thetish.kia.core.ChargeLimits
 import ca.thetish.kia.core.ClimateSettings
 import ca.thetish.kia.core.ClimateSync
 import ca.thetish.kia.core.KiaApi
@@ -114,6 +115,8 @@ class MainActivity : Activity() {
             startActivity(Intent(this, ClimateActivity::class.java))
         }
         findViewById<View>(R.id.precondition_row).setOnClickListener { showSchedule() }
+        findViewById<View>(R.id.ac_limit_cell).setOnClickListener { showChargeLimit(ac = true) }
+        findViewById<View>(R.id.dc_limit_cell).setOnClickListener { showChargeLimit(ac = false) }
 
         climateButton.setOnClickListener {
             send(R.string.climate) { KiaApi.startClimate(KiaSettings.load(this)) }
@@ -189,10 +192,15 @@ class MainActivity : Activity() {
 
     // ── loading ──────────────────────────────────────────────────────────────
 
-    private fun refresh() {
+    /**
+     * @param live read the car itself rather than Kia's cache. Wakes the modem,
+     * so only after a command whose result the cache cannot yet know about.
+     */
+    private fun refresh(live: Boolean = false) {
         status.text = getString(R.string.loading)
         io.execute {
-            val outcome = KiaApi.status(KiaSettings.load(this))
+            val cfg = KiaSettings.load(this)
+            val outcome = if (live) KiaApi.statusLive(cfg) else KiaApi.status(cfg)
             main.post {
                 if (isDestroyed) return@post
                 val s = outcome.status
@@ -208,7 +216,13 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun send(labelRes: Int, call: () -> ApiResult) {
+    /**
+     * @param onSuccess what to do once the car has taken the command. A plain
+     * re-read by default; a caller whose change the cache will not show yet
+     * can do better (see showChargeLimit). Declared before [call] so the
+     * trailing-lambda call sites keep meaning the command.
+     */
+    private fun send(labelRes: Int, onSuccess: () -> Unit = { refresh() }, call: () -> ApiResult) {
         setButtonsEnabled(false)
         status.text = getString(R.string.working, getString(labelRes))
 
@@ -219,7 +233,7 @@ class MainActivity : Activity() {
                 if (isDestroyed) return@post
                 status.text = result.message
                 setButtonsEnabled(true)
-                if (result.ok) refresh()
+                if (result.ok) onSuccess()
             }
         }
     }
@@ -456,6 +470,69 @@ class MainActivity : Activity() {
     }
 
     /**
+     * Change one charge limit - the target state of charge for AC or for DC.
+     *
+     * A dialog with a stepper over the six values Kia accepts, opened from the
+     * figure it changes. Only that one limit is sent; the API keeps the other
+     * as the car has it.
+     *
+     * What happens after is the interesting part. The command returns a
+     * transaction id, not a confirmation, and /status answers from Kia's
+     * cache, which goes on reporting the old limit until the car checks in.
+     * A plain re-read would therefore paint the old value straight back over
+     * the one just chosen and look exactly like a failure. So the chosen value
+     * is shown at once, and a LIVE read follows after a pause long enough for
+     * the car to have applied it - whatever that read says is what the car
+     * says, which is the rule on this screen.
+     */
+    private fun showChargeLimit(ac: Boolean) {
+        val current = if (ac) latest?.chargeLimitAc else latest?.chargeLimitDc
+        var value = ChargeLimits.snap(current ?: ChargeLimits.DEFAULT)
+
+        val view = layoutInflater.inflate(R.layout.dialog_charge_limit, null)
+        val figure = view.findViewById<TextView>(R.id.limit_value)
+        view.findViewById<TextView>(R.id.limit_title)
+            .setText(if (ac) R.string.charge_limit_title_ac else R.string.charge_limit_title_dc)
+
+        fun show() {
+            figure.text = getString(R.string.percent_value, value)
+        }
+        view.findViewById<View>(R.id.limit_down).setOnClickListener { value = ChargeLimits.down(value); show() }
+        view.findViewById<View>(R.id.limit_up).setOnClickListener { value = ChargeLimits.up(value); show() }
+        show()
+
+        val dialog = Dialog(this)
+        dialog.setContentView(view)
+        dialog.window?.apply {
+            setBackgroundDrawableResource(android.R.color.transparent)
+            setLayout(
+                (resources.displayMetrics.widthPixels * 0.9f).toInt(),
+                WindowManager.LayoutParams.WRAP_CONTENT,
+            )
+        }
+        view.findViewById<View>(R.id.limit_cancel).setOnClickListener { dialog.dismiss() }
+        view.findViewById<View>(R.id.limit_set).setOnClickListener {
+            dialog.dismiss()
+            val chosen = value
+            send(
+                R.string.charge_limit_action,
+                onSuccess = {
+                    latest?.let { s ->
+                        val shown = if (ac) s.copy(chargeLimitAc = chosen) else s.copy(chargeLimitDc = chosen)
+                        latest = shown
+                        render(shown)
+                    }
+                    main.postDelayed({ if (!isDestroyed) refresh(live = true) }, LIMIT_APPLY_DELAY_MS)
+                },
+            ) {
+                val cfg = KiaSettings.load(this)
+                if (ac) KiaApi.setChargeLimits(cfg, ac = chosen) else KiaApi.setChargeLimits(cfg, dc = chosen)
+            }
+        }
+        dialog.show()
+    }
+
+    /**
      * The schedule behind the row, read-only.
      *
      * A dialog rather than a screen: it is two timers and a switch, and the
@@ -609,6 +686,8 @@ class MainActivity : Activity() {
 
     private companion object {
         const val DEFAULT_UNIT = "km"
+        /** How long the car gets to apply a new limit before the live read that shows it. */
+        const val LIMIT_APPLY_DELAY_MS = 10_000L
         const val SPAN = Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
     }
 }

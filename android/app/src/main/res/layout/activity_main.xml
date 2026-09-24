@@ -437,7 +437,10 @@
                 android:layout_marginTop="14dp"
                 android:baselineAligned="false">
 
-                <LinearLayout style="@style/Metric">
+                <LinearLayout
+                    android:id="@+id/ac_limit_cell"
+                    style="@style/Metric"
+                    android:background="?android:attr/selectableItemBackground">
 
                     <TextView
                         style="@style/MetricLabel"
@@ -450,7 +453,10 @@
 
                 </LinearLayout>
 
-                <LinearLayout style="@style/Metric">
+                <LinearLayout
+                    android:id="@+id/dc_limit_cell"
+                    style="@style/Metric"
+                    android:background="?android:attr/selectableItemBackground">
 
                     <TextView
                         style="@style/MetricLabel"
@@ -477,6 +483,16 @@
                 </LinearLayout>
 
             </LinearLayout>
+
+            <!-- The two limits above are the only figures on this screen that
+                 can be changed here, and nothing about a figure says so. -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/charge_limit_tap"
+                android:textColor="@color/text_muted"
+                android:textSize="12sp" />
 
         </LinearLayout>
 
