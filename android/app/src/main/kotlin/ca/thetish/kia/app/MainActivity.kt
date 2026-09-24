@@ -330,7 +330,7 @@ class MainActivity : Activity() {
             if (s.openings.isNotEmpty()) {
                 add(getString(R.string.opening_list, s.openings.joinToString(", ")))
             }
-            if (s.engineRunning == true) add(getString(R.string.engine_running))
+            if (s.poweredOn == true) add(getString(R.string.car_on))
         }
 
         findViewById<View>(R.id.attention_card).visibility =
