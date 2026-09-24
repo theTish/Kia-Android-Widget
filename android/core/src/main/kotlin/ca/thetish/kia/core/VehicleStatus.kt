@@ -47,7 +47,14 @@ data class VehicleStatus(
 
     // Security
     val isLocked: Boolean?,
-    val engineRunning: Boolean?,
+    /**
+     * Whether the car is switched on.
+     *
+     * Kia calls it engine_is_running, which this car answers for an electric
+     * motor and a 12V system it has no engine behind. Named for what it means
+     * here rather than for the field it arrives in.
+     */
+    val poweredOn: Boolean?,
     /** Human names of any door or boot standing open, empty when all shut. */
     val doorsOpen: List<String>,
     /** Human names of any window standing open, empty when all shut. */
@@ -183,7 +190,7 @@ data class VehicleStatus(
                 odometerUnit = odo?.stringOrNull("unit"),
 
                 isLocked = json.boolOrNull("is_locked"),
-                engineRunning = json.boolOrNull("engine_running"),
+                poweredOn = json.boolOrNull("engine_running"),
                 doorsOpen = namesOfTrue(doors),
                 windowsOpen = namesOfTrue(windows),
                 windowsReported = windows?.keys()?.asSequence()

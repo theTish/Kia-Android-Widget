@@ -98,7 +98,9 @@
     <string name="climate_seat_driver">driver %1$s</string>
     <string name="climate_seat_passenger">passenger %1$s</string>
     <string name="climate_seat_rear">rear seats %1$s</string>
-    <string name="engine_running">Engine running</string>
+    <!-- The car reports this as engine_is_running, but an EV6 has no engine:
+         what it means is the car is switched on. -->
+    <string name="car_on">Car is on</string>
     <string name="opening_list">Open: %1$s</string>
 
     <!-- Rows -->
