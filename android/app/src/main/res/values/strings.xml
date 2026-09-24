@@ -41,6 +41,8 @@
     <string name="charge_unplugged">Not plugged in</string>
     <string name="charge_charging">Charging</string>
     <string name="charge_charging_left">Charging · %1$s left</string>
+    <string name="charge_charging_power">Charging · %1$s</string>
+    <string name="charge_charging_power_left">Charging · %1$s · %2$s left</string>
     <string name="charge_plugged">Plugged in · not charging</string>
     <string name="charge_plugged_type">Plugged in (%1$s) · not charging</string>
     <string name="charge_limit">Limit %1$d%%</string>

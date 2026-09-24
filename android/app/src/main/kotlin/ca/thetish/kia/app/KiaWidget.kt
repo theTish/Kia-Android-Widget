@@ -90,6 +90,7 @@ internal object Keys {
     // worth knowing about, because it is usually a charger that did not start.
     val pluggedIn = booleanPreferencesKey("plugged_in")
     val chargeRemaining = stringPreferencesKey("charge_remaining")
+    val chargePower = stringPreferencesKey("charge_power")
     val chargeLimitAc = intPreferencesKey("charge_limit_ac")
     val armedUntil = longPreferencesKey("armed_until")
 }
@@ -320,8 +321,14 @@ class KiaWidget : GlanceAppWidget() {
             message.isNotEmpty() -> message to skin.dim
             essentialOnly -> return
             charging -> {
-                val left = prefs[Keys.chargeRemaining]
-                (if (left != null) "Charging · $left left" else "Charging") to skin.accent
+                // The headline already carries a bolt, so the word "Charging"
+                // is the first thing to go when there is a figure to show
+                // instead - this line is one line wide at any widget size.
+                val parts = listOfNotNull(
+                    prefs[Keys.chargePower],
+                    prefs[Keys.chargeRemaining]?.let { "$it left" },
+                )
+                (if (parts.isEmpty()) "Charging" else parts.joinToString(" · ")) to skin.accent
             }
 
             pluggedIn -> "Plugged in · not charging" to skin.text

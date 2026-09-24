@@ -114,6 +114,7 @@ private const val ARC_THICKNESS = 6f
 private const val EDGE_MARGIN = 5f
 private const val FIGURE_SP = 22f
 private const val RANGE_SP = 13f
+private const val BOLT_SIZE = 14f
 private const val SUBTITLE_SP = 11f
 private const val GAP_AFTER_CAR = 2f
 private const val GAP_BEFORE_BUTTONS = 8f
@@ -148,6 +149,9 @@ private class Metrics(device: DeviceParametersBuilders.DeviceParameters) {
     val iconSize = ICON_SIZE * scale
     val figureSize = FIGURE_SP * scale
     val rangeSize = RANGE_SP * scale
+
+    /** The charging bolt, sized to sit with the figure rather than the range. */
+    val boltSize = BOLT_SIZE * scale
     val subtitleSize = SUBTITLE_SP * scale
     val gapAfterCar = GAP_AFTER_CAR * scale
     val gapBeforeButtons = GAP_BEFORE_BUTTONS * scale
@@ -200,6 +204,7 @@ class KiaTileService : TileService() {
             .addIdToImageMapping(IMG_LOCK, drawable(CoreR.drawable.ic_lock))
             .addIdToImageMapping(IMG_UNLOCK, drawable(CoreR.drawable.ic_unlock))
             .addIdToImageMapping(IMG_CLIMATE, drawable(CoreR.drawable.ic_climate))
+            .addIdToImageMapping(IMG_BOLT, drawable(CoreR.drawable.ic_bolt))
             .build()
 
         return ResolvableFuture.create<ResourceBuilders.Resources>().apply { set(resources) }
@@ -425,14 +430,22 @@ class KiaTileService : TileService() {
             .setContentScaleMode(LayoutElementBuilders.CONTENT_SCALE_MODE_FIT)
             .build()
 
-    /** "78% · 412 km", with the charge carrying the weight. */
+    /** "78% · 412 km", with the charge carrying the weight, and a bolt while charging. */
     private fun figures(
         m: Metrics,
         status: VehicleStatus?,
     ): LayoutElementBuilders.LayoutElement {
         val row = LayoutElementBuilders.Row.Builder()
             .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_BOTTOM)
-            .addContent(
+
+        // A bolt beside the figure, rather than a word that would cost the
+        // range its place on a screen this narrow.
+        if (status?.isCharging == true) {
+            row.addContent(icon(IMG_BOLT, m.boltSize, COLOR_ACCENT))
+            row.addContent(hGap(3f))
+        }
+
+        row.addContent(
                 label(
                     text = status?.batteryPercent?.let { "$it%" } ?: "—",
                     size = m.figureSize,
@@ -441,9 +454,21 @@ class KiaTileService : TileService() {
                 )
             )
 
-        status?.range?.let {
+        // While charging, how fast it is going in takes the second slot: the
+        // range is climbing anyway, and the rate is the thing you came to see.
+        val second = if (status?.isCharging == true) {
+            status.chargingPowerText
+                ?: status.range?.let { "$it ${status.rangeUnit ?: "km"}" }
+        } else {
+            status?.range?.let { "$it ${status.rangeUnit ?: "km"}" }
+        }
+        second?.let {
             row.addContent(
-                label(" · $it ${status.rangeUnit ?: "km"}", m.rangeSize, COLOR_TEXT_DIM)
+                label(
+                    " · $it",
+                    m.rangeSize,
+                    if (status?.isCharging == true) COLOR_ACCENT else COLOR_TEXT_DIM,
+                )
             )
         }
 
@@ -571,7 +596,7 @@ class KiaTileService : TileService() {
         val CONFIG = KiaConfig.fromBuildConfig()
 
         // Bumped whenever the drawables change, so the tile refetches them.
-        const val RESOURCES_VERSION = "3"
+        const val RESOURCES_VERSION = "4"
 
         /** How stale a reading may be before the tile goes and asks again. */
         const val STATUS_MAX_AGE_MS = 5 * 60 * 1000L
@@ -583,6 +608,7 @@ class KiaTileService : TileService() {
         const val IMG_LOCK = "img_lock"
         const val IMG_UNLOCK = "img_unlock"
         const val IMG_CLIMATE = "img_climate"
+        const val IMG_BOLT = "img_bolt"
 
         const val ID_LOCK = "lock"
         const val ID_UNLOCK = "unlock"

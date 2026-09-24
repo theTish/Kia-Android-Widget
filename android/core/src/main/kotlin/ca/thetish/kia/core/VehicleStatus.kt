@@ -34,6 +34,17 @@ data class VehicleStatus(
     val pluggedIn: Boolean,
     val plugType: String?,
     val chargingEta: String?,
+
+    /**
+     * How fast the car is drawing, in kW, or null when it is not charging.
+     *
+     * An estimate, and the only one available: Kia Canada never reports the
+     * charging current or voltage, so the API works it back from the battery
+     * size and the time the car says it has left. It moves around as that
+     * estimate does, which is why it is shown as a round figure rather than to
+     * two decimal places it has not earned.
+     */
+    val chargingPowerKw: Double?,
     val chargeRemainingText: String?,
     val chargeLimitAc: Int?,
     val chargeLimitDc: Int?,
@@ -102,6 +113,14 @@ data class VehicleStatus(
      */
     val climateTargetIsLo: Boolean
         get() = setTemperature?.let { it <= LO_CELSIUS } ?: false
+
+    /** "6.6 kW", or "7 kW" when the estimate lands on a whole number. */
+    val chargingPowerText: String?
+        get() = chargingPowerKw?.let {
+            val rounded = Math.round(it * 10) / 10.0
+            val figure = if (rounded % 1.0 == 0.0) rounded.toInt().toString() else rounded.toString()
+            "$figure kW"
+        }
 
     /** One scheduled departure. Days count as Kia does: 0 is Sunday. */
     data class Departure(
@@ -178,6 +197,8 @@ data class VehicleStatus(
                 pluggedIn = json.optBoolean("plugged_in", false),
                 plugType = json.stringOrNull("plug_type"),
                 chargingEta = json.stringOrNull("charging_eta"),
+                chargingPowerKw = json.doubleOrNull("estimated_charging_power_kw")
+                    ?.takeIf { it > 0 },
                 chargeRemainingText = json.stringOrNull("charging_duration_formatted"),
                 chargeLimitAc = limits?.intOrNull("ac"),
                 chargeLimitDc = limits?.intOrNull("dc"),

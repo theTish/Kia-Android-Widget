@@ -59,4 +59,24 @@ class VehicleStatusTest {
         assertFalse(parse("""{"climate": {"set_temperature": 21.0}}""").climateTargetIsLo)
         assertFalse(parse("""{"climate": {"set_temperature": null}}""").climateTargetIsLo)
     }
+
+    @Test
+    fun `charging power reads as a round figure`() {
+        assertEquals(
+            "6.6 kW",
+            parse("""{"estimated_charging_power_kw": 6.6}""").chargingPowerText,
+        )
+        // A whole number should not carry a ".0" on a widget line.
+        assertEquals(
+            "7 kW",
+            parse("""{"estimated_charging_power_kw": 7.0}""").chargingPowerText,
+        )
+    }
+
+    @Test
+    fun `no charging power when the car is not charging`() {
+        // The API sends null rather than 0, but a 0 would be just as useless.
+        assertNull(parse("{}").chargingPowerText)
+        assertNull(parse("""{"estimated_charging_power_kw": 0}""").chargingPowerText)
+    }
 }
