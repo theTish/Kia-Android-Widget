@@ -48,7 +48,11 @@ class FakeVM:
         self.otp_request = None
         self._otp = otp
         self.calls = []
+        # Set by reset(): what check_and_refresh_token should raise, if anything.
+        self.refresh_error = None
+        self.logins = 0
     def login(self):
+        self.logins += 1
         if self._otp:
             self.otp_request = OTPRequest(request_id="uuid", otp_key=None, has_email=True,
                                           has_sms=False, email="u@e.com", sms=None)
@@ -59,14 +63,18 @@ class FakeVM:
     def verify_otp_and_complete_login(self, code):
         self.calls.append(("verify", code)); self.vehicles = {"VID1": make_vehicle()}
     def update_all_vehicles_with_cached_state(self): pass
-    def check_and_refresh_token(self): pass
+    def check_and_refresh_token(self):
+        self.calls.append(("refresh",))
+        if self.refresh_error:
+            raise Exception(self.refresh_error)
     def get_vehicle(self, vid): return self.vehicles[vid]
     def set_charge_limits(self, vid, ac, dc): self.calls.append(("limits", ac, dc)); return "OK"
     def start_charge(self, vid): return "OK"
     def stop_charge(self, vid): return "OK"
 
-def reset(otp=False):
+def reset(otp=False, refresh_error=None):
     fake = FakeVM(otp=otp)
+    fake.refresh_error = refresh_error
     app_mod.vehicle_manager = None
     app_mod.VEHICLE_ID = None
     app_mod.vehicle_state_cache["last_update"] = None
@@ -207,6 +215,43 @@ check("/diagnostics 200", client.get("/diagnostics").status_code == 200)
 # what it just built, so both endpoints have to carry it.
 check("/health reports a revision", "revision" in client.get("/health").get_json())
 check("/diagnostics reports a revision", "revision" in client.get("/diagnostics").get_json())
+
+
+print("\n--- a dead token logs in again rather than failing every read ---")
+# 2026-09-24: the token expired two days into a run, check_and_refresh_token
+# raised "The mandatory fields are missing", and that was the whole response -
+# one warning in the log, and every /status after it answering with Kia's
+# generic error until the container was restarted by hand.
+fake = reset(refresh_error="The mandatory fields are missing")
+r = client.post("/status", headers=H)
+check("/status still 200 after a failed refresh", r.status_code == 200,
+      r.get_data(as_text=True)[:200])
+check("logged in again", fake.logins >= 2, f"logins={fake.logins}")
+check("not left asking for an OTP", app_mod.otp_state["required"] is False)
+
+print("\n--- a re-login that needs an OTP says so, and does not loop ---")
+fake = reset(otp=True, refresh_error="The mandatory fields are missing")
+app_mod.vehicle_manager = fake           # already initialised; token now dead
+app_mod.VEHICLE_ID = "VID1"
+fake.vehicles = {"VID1": make_vehicle()}
+before = fake.logins
+client.post("/status", headers=H)
+check("OTP is flagged for the owner", app_mod.otp_state["required"] is True)
+check("one login attempt, not a retry loop", fake.logins == before + 1,
+      f"logins={fake.logins}")
+
+print("\n--- the login cooldown is respected, not reset ---")
+import time as _time
+fake = reset(refresh_error="The mandatory fields are missing")
+app_mod.vehicle_manager = fake
+app_mod.VEHICLE_ID = "VID1"
+fake.vehicles = {"VID1": make_vehicle()}
+app_mod.otp_state["rate_limited_until"] = _time.time() + 600
+before = fake.logins
+client.post("/status", headers=H)
+check("no login attempt during the cooldown", fake.logins == before,
+      f"logins={fake.logins}")
+app_mod.otp_state["rate_limited_until"] = 0
 
 print("\n" + ("ALL APP CHECKS PASSED" if not fails else f"{len(fails)} FAILURES: {fails}"))
 sys.exit(1 if fails else 0)
