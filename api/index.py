@@ -375,6 +375,66 @@ def _complete_login(vm) -> bool:
     return True
 
 
+def _relogin_locked(reason: str) -> bool:
+    """Log in from scratch after a refresh failed. Caller holds _init_lock.
+
+    Canada has no refresh endpoint, so check_and_refresh_token is itself a
+    login, and when it fails there is nothing left to fall back on: the token
+    is dead and every read answers with Kia's generic "could not be processed"
+    message. That is exactly what happened on 2026-09-24, two days into a run -
+    the failure was one logged warning and the service then stayed broken until
+    somebody restarted the container.
+
+    The cooldown still applies. Kia locks an account out for repeated logins
+    (error 7901) and every attempt resets that timer, so a box that cannot log
+    in must back off rather than retry itself into a longer lockout.
+    """
+    global vehicle_manager, VEHICLE_ID
+    from hyundai_kia_connect_api.ApiImpl import OTPRequest
+
+    wait_minutes = _cooldown_remaining()
+    if wait_minutes:
+        logger.error(f"{reason} Login cooldown active - {wait_minutes} minute(s) left.")
+        return False
+
+    logger.info(f"{reason} Logging in again.")
+    try:
+        vm = _build_vehicle_manager()
+        result = vm.login()
+    except Exception as e:
+        logger.error(f"Re-login failed: {e}", exc_info=True)
+        otp_state["error"] = str(e)
+        _start_cooldown("Re-login raised an error.")
+        return False
+
+    if isinstance(result, OTPRequest):
+        # The 90-day device trust has lapsed. Nothing here can fix that; the
+        # owner has to read an email, so say so and stop.
+        logger.warning("Re-login needs an OTP. Use POST /otp/send.")
+        otp_state.update({
+            "required": True,
+            "verified": False,
+            "sent": False,
+            "error": "OTP required - call POST /otp/send to re-authenticate",
+            "rate_limited_until": 0,
+        })
+        return False
+
+    if result is not True:
+        logger.error(f"Unexpected re-login result: {result!r}")
+        _start_cooldown("Re-login returned an unexpected result.")
+        return False
+
+    vehicle_manager = vm
+    if not _complete_login(vm):
+        return False
+
+    # The stale token's readings are not worth keeping.
+    vehicle_state_cache["last_update"] = None
+    logger.info("Re-login succeeded.")
+    return True
+
+
 def init_vehicle_manager():
     """Initialize vehicle manager lazily on first request."""
     global vehicle_manager, VEHICLE_ID
@@ -531,7 +591,11 @@ def refresh_token_if_needed():
         otp_state["verified"] = False
         otp_state["error"] = "OTP required - call POST /otp/send to re-authenticate"
     except Exception as e:
+        # Not an OTP challenge, so the token is simply dead: on Canada there is
+        # no lesser repair than logging in again.
         logger.warning(f"Token refresh check failed: {e}")
+        with _init_lock:
+            _relogin_locked("Token refresh failed.")
 
 def json_errors(f):
     """Turn an unhandled exception into a 500 JSON body, logged with a traceback.
@@ -1417,7 +1481,15 @@ def _keepalive_loop(interval: int):
                 alive = vehicle_manager.api.test_token(vehicle_manager.token)
                 if not alive:
                     logger.info("Keepalive: token stale, refreshing...")
-                    vehicle_manager.check_and_refresh_token()
+                    try:
+                        vehicle_manager.check_and_refresh_token()
+                    except Exception as e:
+                        # This tick is the first thing to notice an expired
+                        # token, so it is also where the repair belongs -
+                        # waiting for a request means answering that request
+                        # with an error first.
+                        logger.warning(f"Keepalive refresh failed: {e}")
+                        _relogin_locked("Keepalive refresh failed.")
         except Exception as e:
             # Never let this kill the thread - the next tick may well succeed,
             # and a request can always re-initialise on its own.
