@@ -209,6 +209,10 @@ class MainActivity : Activity() {
                     render(s)
                     status.text = getString(R.string.updated_at, shortTime(s.lastUpdated))
                     Geofences.sync(this, s)
+                    // Opening the app is as good a moment as any to judge where
+                    // you are, and it is the one moment someone is watching the
+                    // Auto-lock screen for signs of life.
+                    Geofences.judgeOnPoll(this)
                 } else {
                     status.text = getString(R.string.test_failed, outcome.message)
                 }
