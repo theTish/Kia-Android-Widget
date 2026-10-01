@@ -31,6 +31,7 @@ import java.util.Date
 class GeofenceActivity : Activity() {
 
     private lateinit var modeNote: TextView
+    private lateinit var checked: TextView
     private lateinit var warning: TextView
     private lateinit var radiusValue: TextView
     private lateinit var logContainer: LinearLayout
@@ -54,6 +55,7 @@ class GeofenceActivity : Activity() {
         setContentView(R.layout.activity_geofence)
 
         modeNote = findViewById(R.id.mode_note)
+        checked = findViewById(R.id.checked)
         warning = findViewById(R.id.warning)
         radiusValue = findViewById(R.id.radius_value)
         logContainer = findViewById(R.id.log)
@@ -194,6 +196,16 @@ class GeofenceActivity : Activity() {
         )
 
         radiusValue.text = getString(R.string.geofence_radius_value, KiaSettings.geofenceRadius(this))
+
+        // Said separately from the log because they answer different questions:
+        // the log says what it decided, this says that it is still asking.
+        val at = GeofenceLog.checkedAt(this)
+        checked.text = if (at == 0L) {
+            getString(R.string.geofence_checked_never)
+        } else {
+            getString(R.string.geofence_checked, timestamps.format(Date(at)))
+        }
+        checked.visibility = if (mode == GeofenceMode.OFF) View.GONE else View.VISIBLE
 
         renderWarning(mode)
         renderLog()

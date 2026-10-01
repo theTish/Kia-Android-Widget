@@ -175,6 +175,24 @@ object Geofences {
     }
 
     /**
+     * Judges the parking on every poll as well as on an exit.
+     *
+     * Play Services only speaks up when the phone crosses the ring, and for a
+     * fortnight that was the only thing that ran the evaluator: nine decisions
+     * in ten days, most of them hours apart. An exit that arrives while the
+     * phone is dozing, or a ring that moved under a phone already outside it,
+     * is simply never heard about. The poll is already awake and already
+     * holding a status, so it costs a fix to ask the same question again, and
+     * the evaluator refuses in every case where the answer is no.
+     */
+    fun judgeOnPoll(context: Context) {
+        val app = context.applicationContext
+        if (KiaSettings.geofenceMode(app) == GeofenceMode.OFF) return
+        if (!hasLocationPermission(app)) return
+        GeofenceWorker.enqueue(app, delaySeconds = 0)
+    }
+
+    /**
      * Keeps asking the car where it is, so the ring can follow it.
      *
      * Without this the feature does not work at all, and the way it fails is
@@ -271,13 +289,19 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
         var status = withContext(Dispatchers.IO) { KiaApi.status(KiaSettings.load(app)) }.status
         val fix = currentFix()
 
-        var outcome = evaluate(app, status, fix, allowRefresh = true)
+        val now = System.currentTimeMillis()
+        GeofenceLog.recordCheck(app, now)
+
+        val carReportedAt = status?.let { positionReportedAt(it) }
+        val mayPoll = carReportedAt != null && GeofenceLog.mayPollLive(app, carReportedAt, now)
+        var outcome = evaluate(app, status, fix, allowRefresh = mayPoll)
 
         // Kia's cached answer was too old to decide on. Wake the car, and take
         // whatever it says as final - a second stale answer is refused rather
         // than chased.
         if (outcome.decision is GeofenceDecision.Refresh) {
             log(GeofenceEntry.OUTCOME_HOLD, outcome.decision.reason, acted = false)
+            carReportedAt?.let { GeofenceLog.recordLivePoll(app, it, now) }
             status = withContext(Dispatchers.IO) { KiaApi.statusLive(KiaSettings.load(app)) }.status
             Geofences.sync(app, status)
             outcome = evaluate(app, status, fix, allowRefresh = false)

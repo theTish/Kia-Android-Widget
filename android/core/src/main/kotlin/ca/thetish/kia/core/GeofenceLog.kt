@@ -39,6 +39,13 @@ object GeofenceLog {
     /** Roughly a month of ordinary use, and a few KB. */
     const val MAX_ENTRIES = 120
 
+    private const val KEY_POLLED_FOR = "live_polled_for"
+    private const val KEY_POLLED_AT = "live_polled_at"
+    private const val KEY_CHECKED_AT = "checked_at"
+
+    /** Long enough that crossing a ring repeatedly cannot wake the car repeatedly. */
+    private const val MIN_LIVE_POLL_GAP_MS = 20 * 60 * 1000L
+
     private const val FILE = "kia_geofence_log"
     private const val KEY = "entries"
 
@@ -51,9 +58,51 @@ object GeofenceLog {
      * the ordinary case, and the correct answer - looking exactly like the
      * feature never having run at all.
      */
+    /**
+     * Whether a live poll is worth making now.
+     *
+     * One per parking, because the question it answers - is this car, parked
+     * here, open - has one answer per parking, and a gap between polls so a
+     * ring being crossed repeatedly cannot turn into a modem wake every few
+     * minutes. Anything refused here simply holds, which is this feature's
+     * default answer to everything.
+     */
+    fun mayPollLive(context: Context, carReportedAt: Long, now: Long): Boolean {
+        val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        if (prefs.getLong(KEY_POLLED_FOR, 0L) == carReportedAt) return false
+        return now - prefs.getLong(KEY_POLLED_AT, 0L) >= MIN_LIVE_POLL_GAP_MS
+    }
+
+    fun recordLivePoll(context: Context, carReportedAt: Long, now: Long) {
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(KEY_POLLED_FOR, carReportedAt)
+            .putLong(KEY_POLLED_AT, now)
+            .apply()
+    }
+
+    /** When the evaluator last ran at all, whatever it decided. */
+    fun checkedAt(context: Context): Long =
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getLong(KEY_CHECKED_AT, 0L)
+
+    fun recordCheck(context: Context, now: Long) {
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putLong(KEY_CHECKED_AT, now).apply()
+    }
+
     fun append(context: Context, entry: GeofenceEntry) {
         val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
         val entries = read(context).toMutableList()
+
+        // The same answer twice running is not news. Now that the evaluator
+        // runs on every poll and not only on an exit, without this the log
+        // would be a screen of "inside the ring" and the one line worth
+        // reading would be off the bottom of it.
+        entries.firstOrNull()?.let {
+            if (it.outcome == entry.outcome && it.reason == entry.reason) return
+        }
+
         entries.add(0, entry)
         while (entries.size > MAX_ENTRIES) entries.removeAt(entries.lastIndex)
 

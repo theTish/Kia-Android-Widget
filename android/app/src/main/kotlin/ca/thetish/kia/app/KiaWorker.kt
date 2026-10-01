@@ -97,6 +97,9 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
         // The geofence is drawn around wherever the car last said it was, so
         // every refresh is a chance to move it with the car.
         Geofences.sync(applicationContext, status)
+        // And judge where that leaves things, rather than waiting for Play
+        // Services to notice a ring being crossed - see Geofences.judgeOnPoll.
+        Geofences.judgeOnPoll(applicationContext)
 
         setState { prefs ->
             prefs[Keys.busy] = false

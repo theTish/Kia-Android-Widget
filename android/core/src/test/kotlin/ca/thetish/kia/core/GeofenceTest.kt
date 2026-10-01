@@ -240,17 +240,33 @@ class GeofenceTest {
     }
 
     @Test
-    fun `refuses rather than asks when the car parked long ago`() {
-        // Beyond the refresh window: an old reading about a car that has sat
-        // there for hours is not a walk-away in progress.
+    fun `asks even when the car parked hours ago`() {
+        // The car reports where it parked and then goes quiet, so by the time
+        // anyone walks out of a shop the parking is old and every reading is
+        // stale. Refusing on that basis - which this did until 2026-10-01 -
+        // refused most real walk-aways. Whether a live poll is affordable is
+        // the caller's question: see GeofenceLog.mayPollLive.
         val parkedAt = now - 3 * 60 * 60 * 1000L
         val decision = evaluate(
             car = car(reportedAt = parkedAt),
             readingAt = parkedAt,
             allowRefresh = true,
         ).decision
+        assertTrue(decision is GeofenceDecision.Refresh)
+    }
+
+    @Test
+    fun `a position too old to place the car is still refused`() {
+        // Past six hours the distance being measured is meaningless, and no
+        // reading of the lock can rescue that.
+        val parkedAt = now - 7 * 60 * 60 * 1000L
+        val decision = evaluate(
+            car = car(reportedAt = parkedAt),
+            readingAt = now,
+            allowRefresh = true,
+        ).decision
         assertTrue(decision is GeofenceDecision.Hold)
-        assertTrue(decision.reason.contains("3h old"))
+        assertTrue(decision.reason.contains("7h old"))
     }
 
     @Test

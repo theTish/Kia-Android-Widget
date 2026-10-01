@@ -152,15 +152,14 @@ object Geofence {
     const val MAX_READING_AGE_MS = 5 * 60 * 1000L
 
     /**
-     * How long after the car parked a live poll is worth its cost.
-     *
-     * A forced poll wakes the car's modem and takes a little 12V, so it is not
-     * something to do every quarter of an hour all day while the car sits at
-     * work. Walking away from a car you have just parked happens within
-     * minutes of it reporting that position; past three quarters of an hour,
-     * an old reading is refused instead.
+     * Whether a live poll is affordable is the caller's question, not this
+     * one's: see GeofenceLog.mayPollLive, which allows one per parking and
+     * keeps them apart in time. Tying it to how long ago the car parked, as
+     * this did until 2026-10-01, refused most real walk-aways - the car
+     * reports its position when it parks and then goes quiet, so by the time
+     * anyone walks out of a shop the parking is an hour old and every reading
+     * is stale and unrefreshable.
      */
-    const val REFRESH_WINDOW_MS = 45 * 60 * 1000L
 
     /**
      * @param readingAt when the car reported the state this lock reading came
@@ -188,6 +187,7 @@ object Geofence {
         if (carAge > MAX_CAR_POSITION_AGE_MS) {
             return hold(state, "the car's position is ${hours(carAge)} old")
         }
+
 
         if (fix == null) return hold(state, "no position fix")
         if (fix.accuracyMetres > MAX_ACCURACY_METRES) {
@@ -227,7 +227,7 @@ object Geofence {
         val readingAge = readingAt?.let { now - it }
         if (readingAge == null || readingAge > MAX_READING_AGE_MS) {
             val age = readingAge?.let { ago(it) } ?: "of unknown age"
-            return if (allowRefresh && carAge <= REFRESH_WINDOW_MS) {
+            return if (allowRefresh) {
                 GeofenceOutcome(
                     GeofenceDecision.Refresh("the lock reading is $age - asking the car"),
                     state,

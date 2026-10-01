@@ -177,7 +177,9 @@
     <string name="geofence_needs_background">Background location is not granted, so this can only run while the app is open — which is not when you walk away from the car. Android only allows it from Settings: tap here, then Permissions → Location → Allow all the time.</string>
     <string name="geofence_log">Decisions</string>
     <string name="geofence_clear">Clear</string>
-    <string name="geofence_empty">Nothing yet. An entry appears each time you leave the ring, including the ones where it decided to do nothing.</string>
+    <string name="geofence_checked">Last checked %1$s</string>
+    <string name="geofence_checked_never">Not checked yet</string>
+    <string name="geofence_empty">Nothing yet. An entry appears whenever the answer changes, including the ones where it decided to do nothing.</string>
     <string name="geofence_entry_when">%1$s · %2$s</string>
     <string name="geofence_entry_hold">Did nothing: %1$s</string>
     <string name="geofence_entry_sent">Lock sent to the car</string>
