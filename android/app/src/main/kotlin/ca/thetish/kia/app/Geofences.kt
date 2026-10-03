@@ -366,6 +366,7 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
             now = System.currentTimeMillis(),
             car = car,
             carIsLocked = status?.isLocked,
+            carIsOn = status?.poweredOn,
             fix = fix,
             state = GeofenceLog.loadState(app),
             radiusMetres = KiaSettings.geofenceRadius(app),

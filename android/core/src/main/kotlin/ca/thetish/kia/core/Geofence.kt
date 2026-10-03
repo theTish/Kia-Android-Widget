@@ -152,6 +152,28 @@ object Geofence {
     const val MAX_READING_AGE_MS = 5 * 60 * 1000L
 
     /**
+     * The furthest away "walked off and left it open" can plausibly put you.
+     *
+     * Distance here is the gap between the phone and the position the car last
+     * reported, and that second number can be an hour out of date in a way the
+     * timestamp does not reveal: the car reports where it is when it parks, so
+     * a car that has since been driven somewhere reads as stationary at the old
+     * spot until it parks again. Then the phone is kilometres from a car it is
+     * sitting inside.
+     *
+     * That is what happened on 2026-10-02: the phone was in the car, its owner
+     * was not, and the ring was still drawn around a previous parking. The car
+     * was locked on the strength of a distance of several kilometres.
+     *
+     * The lock that prompted this read "1842m away for 114s, car unlocked", so
+     * the limit has to sit below that. A kilometre is still several minutes'
+     * walk from a car park, and the cost of being wrong in this direction is
+     * only that a car somebody walked a long way from stays unlocked - which is
+     * what happened before this feature existed.
+     */
+    const val MAX_WALK_METRES = 1_000
+
+    /**
      * Whether a live poll is affordable is the caller's question, not this
      * one's: see GeofenceLog.mayPollLive, which allows one per parking and
      * keeps them apart in time. Tying it to how long ago the car parked, as
@@ -172,6 +194,7 @@ object Geofence {
         now: Long,
         car: CarPosition?,
         carIsLocked: Boolean?,
+        carIsOn: Boolean? = null,
         fix: PhoneFix?,
         state: GeofenceState,
         radiusMetres: Int = DEFAULT_RADIUS_METRES,
@@ -189,6 +212,11 @@ object Geofence {
         }
 
 
+        // A car that is running is a car somebody is using, or one deliberately
+        // left warming up. Either way it is not one to lock behind them, and
+        // this is the cheapest refusal available: no fix, no distance, no call.
+        if (carIsOn == true) return hold(state.inside(), "the car is on")
+
         if (fix == null) return hold(state, "no position fix")
         if (fix.accuracyMetres > MAX_ACCURACY_METRES) {
             return hold(state, "fix accurate only to ${fix.accuracyMetres.toInt()}m")
@@ -201,6 +229,12 @@ object Geofence {
 
         if (distance <= radiusMetres) {
             return hold(state.inside(), "${metres}m from the car, inside the ${radiusMetres}m ring")
+        }
+
+        // Far too far to have been walked, which makes the car's position the
+        // thing that is wrong rather than the phone's. See MAX_WALK_METRES.
+        if (distance > MAX_WALK_METRES) {
+            return hold(state, "${metres}m from the car, too far to be a walk")
         }
 
         // Already decided for this reading of the car's position. Waiting for
