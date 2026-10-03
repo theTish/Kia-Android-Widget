@@ -60,6 +60,8 @@ object KiaSettings {
     private const val KEY_WIDGET_BACKGROUND = "widget_background"
     private const val KEY_GEOFENCE_MODE = "geofence_mode"
     private const val KEY_GEOFENCE_RADIUS = "geofence_radius"
+    private const val KEY_CAR_BLUETOOTH = "car_bluetooth"
+    private const val KEY_CAR_BLUETOOTH_NAME = "car_bluetooth_name"
 
     /** Offered in the UI so switching hosts does not mean typing a URL. */
     val KNOWN_HOSTS = listOf(
@@ -165,6 +167,38 @@ object KiaSettings {
             .edit().putString(KEY_GEOFENCE_MODE, mode.name).apply()
     }
 
+    /**
+     * Which paired device is the car.
+     *
+     * Auto-lock turns on this: the disconnect from this address is what says
+     * the car has been switched off, and the phone's position at that moment is
+     * the only trustworthy answer to where the car is. Stored by address
+     * because a name can change; the name is kept beside it only to show.
+     */
+    fun carBluetooth(context: Context): String? =
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString(KEY_CAR_BLUETOOTH, null)
+            ?.takeIf { it.isNotBlank() }
+
+    fun carBluetoothName(context: Context): String? =
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString(KEY_CAR_BLUETOOTH_NAME, null)
+            ?.takeIf { it.isNotBlank() }
+
+    fun saveCarBluetooth(context: Context, address: String?, name: String?) {
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CAR_BLUETOOTH, address)
+            .putString(KEY_CAR_BLUETOOTH_NAME, name)
+            .apply()
+    }
+
+    /** Case-insensitive: Android spells an address in capitals, people do not. */
+    fun isCarBluetooth(context: Context, address: String?): Boolean {
+        val car = carBluetooth(context) ?: return false
+        return address != null && address.equals(car, ignoreCase = true)
+    }
+
     /** How far from the car counts as having left it. */
     fun geofenceRadius(context: Context): Int =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -181,11 +215,18 @@ object KiaSettings {
     /**
      * Bounds on the ring.
      *
-     * Below 75m a GPS fix good enough to pass the accuracy check can still
-     * wander out of it while you sit in the car. Above 500m you have driven
-     * somewhere, and a lock command is chasing a car that has moved.
+     * 25m is deliberately smaller than a fix is usually accurate to. That used
+     * to be the argument for a 75m floor - a fix can wander out of a small ring
+     * while you sit in the car - but the evaluator now requires the gap to
+     * clear the ring by the fix's own margin of error, so a ring smaller than
+     * the fix simply never fires rather than firing wrongly. What it buys is
+     * the case this was always for: a car on the drive and its owner indoors,
+     * thirty metres away.
+     *
+     * Above 500m you have driven somewhere, and a lock command is chasing a car
+     * that has moved.
      */
-    const val MIN_RADIUS_METRES = 75
+    const val MIN_RADIUS_METRES = 25
     const val MAX_RADIUS_METRES = 500
 
     /** Presentation, not connection, so it is read on its own rather than through KiaConfig. */

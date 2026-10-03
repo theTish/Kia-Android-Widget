@@ -169,7 +169,13 @@
     <string name="geofence_note_off">Not running.</string>
     <string name="geofence_note_shadow">Deciding and writing it down. The car is never touched — leave it here for a couple of weeks and read the log before arming it.</string>
     <string name="geofence_note_armed">Will lock the car on its own.</string>
+    <string name="geofence_car_device">The car\'s Bluetooth</string>
+    <string name="geofence_car_device_none">Not chosen — auto-lock cannot run</string>
+    <string name="geofence_car_device_pick">Which device is the car?</string>
+    <string name="geofence_car_device_empty">No paired devices. Pair the phone with the car first.</string>
+    <string name="geofence_needs_bluetooth">Allow nearby device access so the car\'s Bluetooth can be seen</string>
     <string name="geofence_radius">Ring radius</string>
+    <string name="geofence_radius_note">A small ring suits a car on the drive, and needs a confident fix to fire: a vague one is refused rather than guessed at.</string>
     <string name="geofence_radius_value">%1$d m from where the car parked</string>
     <string name="geofence_radius_smaller">Smaller ring</string>
     <string name="geofence_radius_bigger">Bigger ring</string>

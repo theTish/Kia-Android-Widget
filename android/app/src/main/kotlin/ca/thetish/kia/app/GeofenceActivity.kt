@@ -2,6 +2,8 @@ package ca.thetish.kia.app
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
+import android.bluetooth.BluetoothManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -34,6 +36,7 @@ class GeofenceActivity : Activity() {
     private lateinit var checked: TextView
     private lateinit var warning: TextView
     private lateinit var radiusValue: TextView
+    private lateinit var carDevice: TextView
     private lateinit var logContainer: LinearLayout
     private lateinit var empty: TextView
 
@@ -58,6 +61,8 @@ class GeofenceActivity : Activity() {
         checked = findViewById(R.id.checked)
         warning = findViewById(R.id.warning)
         radiusValue = findViewById(R.id.radius_value)
+        carDevice = findViewById(R.id.car_device_value)
+        findViewById<View>(R.id.car_device).setOnClickListener { chooseCarDevice() }
         logContainer = findViewById(R.id.log)
         empty = findViewById(R.id.empty)
 
@@ -87,26 +92,11 @@ class GeofenceActivity : Activity() {
         KiaSettings.saveGeofenceMode(this, mode)
 
         if (mode == GeofenceMode.OFF) {
-            Geofences.remove(this)
+            Geofences.stop(this)
         } else {
             requestWhatIsMissing()
-            startIfReady()
         }
         render()
-    }
-
-    /**
-     * Gets the ring drawn now rather than whenever something next refreshes.
-     *
-     * Turning this on and seeing nothing happen for fifteen minutes would be
-     * indistinguishable from it being broken, so one status is fetched
-     * immediately; that call ends in Geofences.sync like every other.
-     */
-    private fun startIfReady() {
-        if (KiaSettings.geofenceMode(this) == GeofenceMode.OFF) return
-        if (!Geofences.hasLocationPermission(this)) return
-        Geofences.schedulePolling(this)
-        KiaWorker.enqueue(this, KiaWorker.ACTION_STATUS)
     }
 
     /**
@@ -159,7 +149,6 @@ class GeofenceActivity : Activity() {
         // Foreground granted opens the door to asking for background; the rest
         // just redraws with whatever the answer was.
         if (requestCode == REQUEST_FOREGROUND) requestWhatIsMissing()
-        startIfReady()
         render()
     }
 
@@ -167,6 +156,51 @@ class GeofenceActivity : Activity() {
         val current = KiaSettings.geofenceRadius(this)
         KiaSettings.saveGeofenceRadius(this, current + delta)
         render()
+    }
+
+    /**
+     * Picks the car out of the phone's paired devices.
+     *
+     * A list of what is already paired rather than a scan: the car is paired,
+     * scanning is a permission and a battery cost for a question already
+     * answered, and a wrong choice here means the whole feature waits for a
+     * disconnect that never comes.
+     */
+    private fun chooseCarDevice() {
+        if (!Geofences.hasBluetoothPermission(this)) {
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BLUETOOTH)
+            return
+        }
+
+        val adapter = getSystemService(BluetoothManager::class.java)?.adapter
+        val paired = runCatching { adapter?.bondedDevices?.toList() }.getOrNull().orEmpty()
+            .sortedBy { runCatching { it.name }.getOrNull() ?: it.address }
+
+        if (paired.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setMessage(R.string.geofence_car_device_empty)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+            return
+        }
+
+        val labels = paired.map { runCatching { it.name }.getOrNull() ?: it.address }.toTypedArray()
+        val chosen = paired.indexOfFirst { KiaSettings.isCarBluetooth(this, it.address) }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.geofence_car_device_pick)
+            .setSingleChoiceItems(labels, chosen) { dialog, which ->
+                val device = paired[which]
+                KiaSettings.saveCarBluetooth(
+                    this,
+                    device.address,
+                    runCatching { device.name }.getOrNull(),
+                )
+                dialog.dismiss()
+                render()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     // ── rendering ──
@@ -207,6 +241,10 @@ class GeofenceActivity : Activity() {
         }
         checked.visibility = if (mode == GeofenceMode.OFF) View.GONE else View.VISIBLE
 
+        carDevice.text = KiaSettings.carBluetoothName(this)
+            ?: KiaSettings.carBluetooth(this)
+            ?: getString(R.string.geofence_car_device_none)
+
         renderWarning(mode)
         renderLog()
     }
@@ -214,6 +252,10 @@ class GeofenceActivity : Activity() {
     private fun renderWarning(mode: GeofenceMode) {
         val message = when {
             mode == GeofenceMode.OFF -> null
+            // Named first: without it nothing ever triggers, so the other
+            // warnings would be about a feature that cannot start anyway.
+            KiaSettings.carBluetooth(this) == null -> getString(R.string.geofence_car_device_none)
+            !Geofences.hasBluetoothPermission(this) -> getString(R.string.geofence_needs_bluetooth)
             !Geofences.hasLocationPermission(this) -> getString(R.string.geofence_needs_location)
             !Geofences.hasBackgroundLocationPermission(this) ->
                 getString(R.string.geofence_needs_background)
@@ -310,5 +352,6 @@ class GeofenceActivity : Activity() {
     private companion object {
         const val REQUEST_FOREGROUND = 1
         const val REQUEST_NOTIFY = 3
+        const val REQUEST_BLUETOOTH = 4
     }
 }

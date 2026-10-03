@@ -6,12 +6,25 @@ import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/** Where the car said it was, and when it said so. */
-data class CarPosition(
+/**
+ * Where the car is, taken from the phone at the moment it stopped being in it.
+ *
+ * The phone's own fix when the car's Bluetooth dropped. At that instant the
+ * phone is inside the car, so this is the car's position measured by the only
+ * instrument on hand that is both accurate and current.
+ *
+ * It replaces the position Kia reports, which is neither. The car reports where
+ * it is when it parks and then goes quiet, and nothing in the payload says that
+ * figure is stale - which on 2026-10-02 put the phone "1842m" from a car it was
+ * sitting inside, and locked it.
+ */
+data class Anchor(
     val latitude: Double,
     val longitude: Double,
-    /** Wall-clock millis, from /status - not the elapsed-realtime clock. */
-    val reportedAt: Long,
+    /** How well the fix that produced it was placed. */
+    val accuracyMetres: Float,
+    /** Wall-clock millis of the disconnect. */
+    val atMillis: Long,
 )
 
 /** One position fix from the phone. */
@@ -47,14 +60,14 @@ sealed interface GeofenceDecision {
     /** Nothing to do, and here is what ruled it out. */
     data class Hold(override val reason: String) : GeofenceDecision
 
-    /** Outside the ring, but not for long enough yet. */
+    /** Away from the car, but not for long enough yet. */
     data class Waiting(override val reason: String) : GeofenceDecision
 
     /** Walked away from an unlocked car. */
     data class Lock(override val reason: String, val distanceMetres: Int) : GeofenceDecision
 
     /**
-     * Outside the ring, but the lock reading is too old to act on.
+     * Away from the car, but the lock reading is too old to act on.
      *
      * The caller is expected to ask the car itself and evaluate again. Kia
      * serves a cached view that can be hours behind: on 2026-09-22 it reported
@@ -71,107 +84,110 @@ sealed interface GeofenceDecision {
  * this and hands it back.
  */
 data class GeofenceState(
-    /** When the phone was first seen outside the ring. 0 when it is inside. */
-    val outsideSince: Long = 0L,
+    /** When the phone was first seen clear of the anchor. 0 when it is not. */
+    val awaySince: Long = 0L,
 
     /**
-     * The car position a lock has already been decided for.
+     * The anchor a lock has already been decided for.
      *
      * Without this the evaluator re-fires on every fix for as long as you are
      * away from the car, which in shadow mode is a log full of noise and in
-     * armed mode is a lock command every couple of minutes all day.
+     * armed mode is a lock command every couple of minutes all day. The next
+     * drive produces a new disconnect, and with it a new anchor.
      */
-    val actedOnCarReportedAt: Long = 0L,
+    val actedOnAnchorAt: Long = 0L,
 )
 
 /** A decision and the state to carry forward. */
 data class GeofenceOutcome(val decision: GeofenceDecision, val state: GeofenceState)
 
 /**
- * Should the car be locked, given where it is and where you are?
+ * Should the car be locked, given that you have got out of it?
  *
- * The rule this replaces is a Tasker task that takes two GPS fixes 45 seconds
- * apart and compares them to the phone's own last position. That works, but it
- * is measuring the wrong thing: it knows you have moved, not that you have
- * moved away from the car. Anchoring to the position the car itself reports
- * means it behaves the same whether the car is on the drive or at the far end
- * of a car park you walked across.
+ * This replaces a Tasker task that locked on Bluetooth disconnect after a bare
+ * `Wait 45 seconds`, with no check that anybody had left - so it locked the
+ * keys and the phone inside the car. That incident is why this project exists,
+ * and why the disconnect here is only the question, never the answer.
  *
- * Every rule here exists to refuse rather than to fire. Locking a car nobody
- * has left is a nuisance; failing to lock one is what the owner was already
- * doing by hand. So an unknown reads as "do nothing" everywhere, and the
- * decision needs a known-unlocked car, a position the car reported recently, a
- * fix good enough to believe, and distance that holds up over time.
+ * The disconnect says the car has been switched off. What follows says whether
+ * anyone actually left it: the phone has to move clear of where it was sitting
+ * when the music stopped, by more than its own fix could be wrong by, and still
+ * be clear a minute later.
+ *
+ * Every rule exists to refuse rather than to fire. Locking a car nobody has
+ * left is a nuisance at best and a lockout at worst; failing to lock one is
+ * what the owner was already doing by hand. So an unknown reads as "do nothing"
+ * everywhere.
  */
 object Geofence {
 
     /**
-     * How far you have to get from the car.
+     * How far from the car counts as having left it.
      *
-     * 150m is past the other side of a supermarket car park but well inside
-     * "walked to the shop", which is the distance at which forgetting matters.
+     * Small, because the anchor is trustworthy now. The case this was written
+     * for is a car on the drive and its owner indoors, thirty metres away; a
+     * ring wide enough to cover a GPS wobble would never see it. What makes a
+     * ring this small safe is the margin rule below, not the number itself.
      */
-    const val DEFAULT_RADIUS_METRES = 150
+    const val DEFAULT_RADIUS_METRES = 50
 
     /**
      * How long you have to stay out there.
      *
-     * The Tasker rule used 45 seconds and rarely misfired, so this is not a
-     * number that needs to be brave. It is the difference between walking away
-     * and a GPS fix wandering off across the road for one sample.
+     * The Tasker rule waited forty-five seconds and then locked whatever had
+     * happened. This waits for a second opinion instead: the first reading past
+     * the ring starts a clock, and the lock needs the phone still clear when it
+     * runs out. A minute is two separate readings, which is the point of it,
+     * and it covers getting out to open a gate and getting back in.
      */
-    const val DEFAULT_DWELL_SECONDS = 90
+    const val DEFAULT_DWELL_SECONDS = 60
 
     /**
-     * The worst fix worth believing.
+     * The worst fix worth reasoning about at all.
      *
      * A network fix in a city can be accurate to 500m, which is to say it can
-     * put you three ring-widths away without your having moved. Those get
-     * thrown out rather than averaged in.
+     * put you three ring-widths away without your having moved. Whether a given
+     * fix is good enough for a given ring is decided by the margin test at the
+     * distance check; this is only the outer limit.
      */
     const val MAX_ACCURACY_METRES = 60f
 
     /**
-     * How stale the car's own position may be.
-     *
-     * Past this it is a record of where the car was, not where it is, and the
-     * distance being measured is meaningless. Six hours covers a working day
-     * parked up without covering an overnight where the car may have moved
-     * without this app hearing about it.
-     */
-    const val MAX_CAR_POSITION_AGE_MS = 6 * 60 * 60 * 1000L
-
-    /**
      * How old the lock reading may be before it is worth waking the car for.
      *
-     * Kia answers /status from a cache the car refreshes when it feels like
-     * it, so "locked" can mean "was locked when the car last checked in".
-     * Five minutes is short enough that a reading this recent can only have
-     * come from the drive that just ended or a poll made for this decision.
+     * Kia answers /status from a cache the car refreshes when it feels like it,
+     * so "locked" can mean "was locked when the car last checked in". Five
+     * minutes is short enough that a reading this recent can only have come
+     * from the drive that just ended or a poll made for this decision.
      */
     const val MAX_READING_AGE_MS = 5 * 60 * 1000L
 
     /**
-     * Whether a live poll is affordable is the caller's question, not this
-     * one's: see GeofenceLog.mayPollLive, which allows one per parking and
-     * keeps them apart in time. Tying it to how long ago the car parked, as
-     * this did until 2026-10-01, refused most real walk-aways - the car
-     * reports its position when it parks and then goes quiet, so by the time
-     * anyone walks out of a shop the parking is an hour old and every reading
-     * is stale and unrefreshable.
+     * A backstop, not a rule about walking.
+     *
+     * With the anchor coming from the phone, distance is normally beyond doubt.
+     * The one way it can lie is a Bluetooth session that drops mid-drive: the
+     * anchor lands on the road and the gap grows at thirty metres a second. The
+     * car being on refuses that case first, and this catches it if Kia's idea
+     * of "on" is stale too.
      */
+    const val MAX_PLAUSIBLE_METRES = 2_000
 
     /**
+     * @param anchor where the car was when its Bluetooth dropped, or null if
+     *   this phone has not seen a disconnect to measure from.
      * @param readingAt when the car reported the state this lock reading came
      *   from, or null if it did not say.
-     * @param allowRefresh false once a live poll has already been made for
-     *   this decision, so a car that answers with a stale reading anyway is
-     *   refused rather than polled in a loop.
+     * @param allowRefresh whether a live poll is affordable right now; see
+     *   GeofenceLog.mayPollLive. False once one has been made for this decision,
+     *   so a car that answers with a stale reading anyway is refused rather than
+     *   polled in a loop.
      */
     fun evaluate(
         now: Long,
-        car: CarPosition?,
+        anchor: Anchor?,
         carIsLocked: Boolean?,
+        carIsOn: Boolean? = null,
         fix: PhoneFix?,
         state: GeofenceState,
         radiusMetres: Int = DEFAULT_RADIUS_METRES,
@@ -179,45 +195,56 @@ object Geofence {
         readingAt: Long? = null,
         allowRefresh: Boolean = false,
     ): GeofenceOutcome {
-        // ── Reasons to do nothing at all ──
+        // ── Is there a question to answer? ──
 
-        if (car == null) return hold(state, "the car has not reported a position")
+        if (anchor == null) return hold(state, "no disconnect to measure from")
 
-        val carAge = now - car.reportedAt
-        if (carAge > MAX_CAR_POSITION_AGE_MS) {
-            return hold(state, "the car's position is ${hours(carAge)} old")
-        }
-
+        // A car that is running is a car somebody is using, or one deliberately
+        // left warming up. Either way it is not one to lock behind them, and
+        // this is the cheapest refusal available: no fix, no distance, no call.
+        if (carIsOn == true) return hold(state.beside(), "the car is on")
 
         if (fix == null) return hold(state, "no position fix")
         if (fix.accuracyMetres > MAX_ACCURACY_METRES) {
             return hold(state, "fix accurate only to ${fix.accuracyMetres.toInt()}m")
         }
 
-        // ── Distance ──
+        // ── How far from the car ──
 
-        val distance = distanceMetres(car.latitude, car.longitude, fix.latitude, fix.longitude)
+        val distance = distanceMetres(anchor.latitude, anchor.longitude, fix.latitude, fix.longitude)
         val metres = distance.toInt()
 
-        if (distance <= radiusMetres) {
-            return hold(state.inside(), "${metres}m from the car, inside the ${radiusMetres}m ring")
+        // Clear of the ring by more than the fix could be wrong by. A phone 40m
+        // from the car on a fix accurate to 30m has told you nothing: it is
+        // equally consistent with sitting in the driver's seat. Written as a
+        // margin rather than a floor on the ring so that a small ring - a car
+        // on the drive, its owner indoors - is safe to ask for.
+        val clear = distance - fix.accuracyMetres - anchor.accuracyMetres
+        if (clear <= radiusMetres) {
+            val reason = if (distance <= radiusMetres) {
+                "${metres}m from the car, inside the ${radiusMetres}m ring"
+            } else {
+                "${metres}m from the car, give or take ${fix.accuracyMetres.toInt()}m - " +
+                    "not clear of the ${radiusMetres}m ring"
+            }
+            return hold(state.beside(), reason)
         }
 
-        // Already decided for this reading of the car's position. Waiting for
-        // the car to report a new one is what makes the latch release itself:
-        // the next drive gives a new timestamp.
-        if (state.actedOnCarReportedAt == car.reportedAt) {
-            return GeofenceOutcome(
-                GeofenceDecision.Hold("already decided for this parking"),
-                state,
-            )
+        if (distance > MAX_PLAUSIBLE_METRES) {
+            return hold(state, "${metres}m from the car, further than getting out explains")
         }
 
-        // ── Is the car even open? ──
+        // Already decided for this disconnect. The next drive ends in another
+        // one, which is what releases the latch.
+        if (state.actedOnAnchorAt == anchor.atMillis) {
+            return GeofenceOutcome(GeofenceDecision.Hold("already decided for this parking"), state)
+        }
+
+        // ── Is the car open? ──
         //
-        // Asked here rather than first because it is the expensive question:
-        // the answer that matters is a live one, and there is no point waking
-        // a car to learn the lock state of one you are standing next to.
+        // Asked last because it is the expensive question: the answer that
+        // matters is a live one, and there is no point waking a car you have
+        // not yet walked away from.
 
         // An unknown lock state is not an unlocked one. This is the single most
         // important refusal here: it is what stops a failed /status from
@@ -226,7 +253,7 @@ object Geofence {
 
         val readingAge = readingAt?.let { now - it }
         if (readingAge == null || readingAge > MAX_READING_AGE_MS) {
-            val age = readingAge?.let { ago(it) } ?: "of unknown age"
+            val age = readingAge?.let { "${hours(it)} old" } ?: "of unknown age"
             return if (allowRefresh) {
                 GeofenceOutcome(
                     GeofenceDecision.Refresh("the lock reading is $age - asking the car"),
@@ -237,31 +264,29 @@ object Geofence {
             }
         }
 
-        // Locked resets the dwell: the walk this clock was timing ended with
-        // the car shut, so the next one starts from scratch.
-        if (carIsLocked) return hold(state.inside(), "already locked")
+        // Locked resets the clock: whatever this was timing ended with the car
+        // shut, so the next walk starts from scratch.
+        if (carIsLocked) return hold(state.beside(), "already locked")
 
-        // ── Outside, and it counts ──
+        // ── Away, and it counts ──
 
-        val outsideSince = if (state.outsideSince == 0L) fix.atMillis else state.outsideSince
-        val outsideFor = fix.atMillis - outsideSince
+        val awaySince = if (state.awaySince == 0L) fix.atMillis else state.awaySince
+        val awayFor = fix.atMillis - awaySince
         val dwellMs = dwellSeconds * 1000L
 
-        if (outsideFor < dwellMs) {
+        if (awayFor < dwellMs) {
             return GeofenceOutcome(
-                GeofenceDecision.Waiting(
-                    "${metres}m away, ${outsideFor / 1000}s of ${dwellSeconds}s"
-                ),
-                state.copy(outsideSince = outsideSince),
+                GeofenceDecision.Waiting("${metres}m away, ${awayFor / 1000}s of ${dwellSeconds}s"),
+                state.copy(awaySince = awaySince),
             )
         }
 
         return GeofenceOutcome(
             GeofenceDecision.Lock(
-                reason = "${metres}m away for ${outsideFor / 1000}s, car unlocked",
+                reason = "${metres}m away for ${awayFor / 1000}s, car unlocked",
                 distanceMetres = metres,
             ),
-            GeofenceState(outsideSince = 0L, actedOnCarReportedAt = car.reportedAt),
+            GeofenceState(awaySince = 0L, actedOnAnchorAt = anchor.atMillis),
         )
     }
 
@@ -269,8 +294,7 @@ object Geofence {
      * Great-circle distance in metres.
      *
      * Haversine on a sphere. At the scale this works over - a few hundred
-     * metres - the error against a proper ellipsoid is centimetres, and the
-     * ring is 150m wide.
+     * metres - the error against a proper ellipsoid is centimetres.
      */
     fun distanceMetres(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
         val dLat = Math.toRadians(lat2 - lat1)
@@ -284,11 +308,8 @@ object Geofence {
     private fun hold(state: GeofenceState, reason: String) =
         GeofenceOutcome(GeofenceDecision.Hold(reason), state)
 
-    /** Back within the ring: the dwell timer starts again from scratch next time. */
-    private fun GeofenceState.inside() = copy(outsideSince = 0L)
-
-    /** "12m old", "2h old" - the age of a reading, in the largest unit that reads plainly. */
-    private fun ago(millis: Long): String = "${hours(millis)} old"
+    /** Still at the car: the dwell starts again from scratch next time. */
+    private fun GeofenceState.beside() = copy(awaySince = 0L)
 
     private fun hours(millis: Long): String {
         val h = millis / (60 * 60 * 1000L)

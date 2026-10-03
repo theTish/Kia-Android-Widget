@@ -42,6 +42,12 @@ object GeofenceLog {
     private const val KEY_POLLED_FOR = "live_polled_for"
     private const val KEY_POLLED_AT = "live_polled_at"
     private const val KEY_CHECKED_AT = "checked_at"
+    private const val KEY_CHASING_FOR = "chasing_for"
+    private const val KEY_CHASES = "chases"
+    private const val KEY_ANCHOR_LAT = "anchor_lat"
+    private const val KEY_ANCHOR_LON = "anchor_lon"
+    private const val KEY_ANCHOR_ACCURACY = "anchor_accuracy"
+    private const val KEY_ANCHOR_AT = "anchor_at"
 
     /** Long enough that crossing a ring repeatedly cannot wake the car repeatedly. */
     private const val MIN_LIVE_POLL_GAP_MS = 20 * 60 * 1000L
@@ -52,10 +58,9 @@ object GeofenceLog {
     /**
      * Records a decision, newest first.
      *
-     * Holds included. This only runs when Play Services reports you leaving the
-     * car, so there are a few a day rather than one a minute, and they are the
-     * lines that matter most: dropping them left an exit from a locked car -
-     * the ordinary case, and the correct answer - looking exactly like the
+     * Holds included. They are the lines that matter most: dropping them left
+     * getting out of a car that was already locked - the ordinary case, and the
+     * correct answer - looking exactly like the
      * feature never having run at all.
      */
     /**
@@ -67,17 +72,79 @@ object GeofenceLog {
      * minutes. Anything refused here simply holds, which is this feature's
      * default answer to everything.
      */
-    fun mayPollLive(context: Context, carReportedAt: Long, now: Long): Boolean {
+    fun mayPollLive(context: Context, anchorAt: Long, now: Long): Boolean {
         val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-        if (prefs.getLong(KEY_POLLED_FOR, 0L) == carReportedAt) return false
+        if (prefs.getLong(KEY_POLLED_FOR, 0L) == anchorAt) return false
         return now - prefs.getLong(KEY_POLLED_AT, 0L) >= MIN_LIVE_POLL_GAP_MS
     }
 
-    fun recordLivePoll(context: Context, carReportedAt: Long, now: Long) {
+    fun recordLivePoll(context: Context, anchorAt: Long, now: Long) {
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .edit()
-            .putLong(KEY_POLLED_FOR, carReportedAt)
+            .putLong(KEY_POLLED_FOR, anchorAt)
             .putLong(KEY_POLLED_AT, now)
+            .apply()
+    }
+
+    /**
+     * Where the car was when its Bluetooth last dropped, or null if this phone
+     * has not seen a disconnect since it was set up.
+     *
+     * Kept here rather than in settings because it is evidence, not a
+     * preference: it belongs with the state the evaluator reads back.
+     */
+    fun anchor(context: Context): Anchor? {
+        val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        val at = prefs.getLong(KEY_ANCHOR_AT, 0L)
+        if (at == 0L) return null
+        return Anchor(
+            latitude = Double.fromBits(prefs.getLong(KEY_ANCHOR_LAT, 0L)),
+            longitude = Double.fromBits(prefs.getLong(KEY_ANCHOR_LON, 0L)),
+            accuracyMetres = prefs.getFloat(KEY_ANCHOR_ACCURACY, 0f),
+            atMillis = at,
+        )
+    }
+
+    fun saveAnchor(context: Context, anchor: Anchor) {
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            // Stored as raw bits: SharedPreferences has no putDouble, and a
+            // float would round a latitude to about a metre and a half.
+            .putLong(KEY_ANCHOR_LAT, anchor.latitude.toRawBits())
+            .putLong(KEY_ANCHOR_LON, anchor.longitude.toRawBits())
+            .putFloat(KEY_ANCHOR_ACCURACY, anchor.accuracyMetres)
+            .putLong(KEY_ANCHOR_AT, anchor.atMillis)
+            .apply()
+    }
+
+    fun clearAnchor(context: Context) {
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_ANCHOR_LAT)
+            .remove(KEY_ANCHOR_LON)
+            .remove(KEY_ANCHOR_ACCURACY)
+            .remove(KEY_ANCHOR_AT)
+            .apply()
+    }
+
+    /**
+     * How many close-together checks have already been spent on this parking.
+     *
+     * Counted per car position report, so a new parking starts again, and
+     * capped by the caller: the point is to watch an unlocked car for the few
+     * minutes in which somebody walks away from it, not to poll all evening.
+     */
+    fun chases(context: Context, anchorAt: Long): Int {
+        val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        if (prefs.getLong(KEY_CHASING_FOR, 0L) != anchorAt) return 0
+        return prefs.getInt(KEY_CHASES, 0)
+    }
+
+    fun recordChase(context: Context, anchorAt: Long, count: Int) {
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(KEY_CHASING_FOR, anchorAt)
+            .putInt(KEY_CHASES, count)
             .apply()
     }
 
@@ -148,16 +215,16 @@ object GeofenceLog {
     fun loadState(context: Context): GeofenceState {
         val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
         return GeofenceState(
-            outsideSince = prefs.getLong("outside_since", 0L),
-            actedOnCarReportedAt = prefs.getLong("acted_on", 0L),
+            awaySince = prefs.getLong("away_since", 0L),
+            actedOnAnchorAt = prefs.getLong("acted_on", 0L),
         )
     }
 
     fun saveState(context: Context, state: GeofenceState) {
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .edit()
-            .putLong("outside_since", state.outsideSince)
-            .putLong("acted_on", state.actedOnCarReportedAt)
+            .putLong("away_since", state.awaySince)
+            .putLong("acted_on", state.actedOnAnchorAt)
             .apply()
     }
 }
