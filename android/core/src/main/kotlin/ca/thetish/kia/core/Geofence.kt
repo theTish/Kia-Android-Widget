@@ -128,6 +128,10 @@ object Geofence {
      * A network fix in a city can be accurate to 500m, which is to say it can
      * put you three ring-widths away without your having moved. Those get
      * thrown out rather than averaged in.
+     *
+     * This is only the outer limit on a fix worth reasoning about at all. What
+     * decides whether a given fix is good enough for a given ring is the margin
+     * test at the distance check, which is what makes a 25m ring safe to offer.
      */
     const val MAX_ACCURACY_METRES = 60f
 
@@ -227,8 +231,21 @@ object Geofence {
         val distance = distanceMetres(car.latitude, car.longitude, fix.latitude, fix.longitude)
         val metres = distance.toInt()
 
-        if (distance <= radiusMetres) {
-            return hold(state.inside(), "${metres}m from the car, inside the ${radiusMetres}m ring")
+        // Outside the ring by more than the fix could be wrong by. A phone
+        // 40m from the car on a fix accurate to 30m has told you nothing: it
+        // is consistent with sitting in the driver's seat. Written as a margin
+        // rather than a flat floor on the ring so that a small ring - a car on
+        // the drive, its owner indoors - is safe to ask for: with a vague fix
+        // it refuses, instead of firing on noise.
+        val clearOfRing = distance - fix.accuracyMetres
+        if (clearOfRing <= radiusMetres) {
+            val reason = if (distance <= radiusMetres) {
+                "${metres}m from the car, inside the ${radiusMetres}m ring"
+            } else {
+                "${metres}m from the car, give or take ${fix.accuracyMetres.toInt()}m - " +
+                    "not clear of the ${radiusMetres}m ring"
+            }
+            return hold(state.inside(), reason)
         }
 
         // Far too far to have been walked, which makes the car's position the

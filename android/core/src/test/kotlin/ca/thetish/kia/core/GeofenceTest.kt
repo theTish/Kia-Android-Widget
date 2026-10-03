@@ -39,6 +39,7 @@ class GeofenceTest {
         // the age rules have their own cases below.
         readingAt: Long? = at,
         allowRefresh: Boolean = false,
+        radius: Int = Geofence.DEFAULT_RADIUS_METRES,
     ) = Geofence.evaluate(
         now = at,
         car = car,
@@ -46,6 +47,7 @@ class GeofenceTest {
         carIsOn = on,
         fix = fix,
         state = state,
+        radiusMetres = radius,
         readingAt = readingAt,
         allowRefresh = allowRefresh,
     )
@@ -228,6 +230,36 @@ class GeofenceTest {
         assertTrue(seen.take(3).all { it is GeofenceDecision.Waiting })
         assertTrue(seen.last() is GeofenceDecision.Lock)
     }
+
+    // ── the fix has to clear the ring by its own margin of error ──
+
+    @Test
+    fun `a vague fix just outside a small ring decides nothing`() {
+        // 40m away on a fix accurate to 30m is consistent with sitting in the
+        // driver's seat, whatever the arithmetic says.
+        val decision = evaluate(
+            fix = fixAt(40.0, accuracy = 30f),
+            radius = 25,
+        ).decision
+        assertTrue(decision is GeofenceDecision.Hold)
+        assertTrue(decision.reason.contains("not clear of the 25m ring"))
+    }
+
+    @Test
+    fun `a confident fix outside a small ring does count`() {
+        // Indoors, thirty metres from a car on the drive: the case a 25m ring
+        // exists for.
+        val later = now + Geofence.DEFAULT_DWELL_SECONDS * 1000L
+        val decision = evaluate(
+            fix = fixAt(45.0, accuracy = 8f, at = later),
+            state = GeofenceState(outsideSince = now),
+            at = later,
+            readingAt = later,
+            radius = 25,
+        ).decision
+        assertTrue(decision is GeofenceDecision.Lock)
+    }
+
 
     // ── the car itself says it is in use ──
 

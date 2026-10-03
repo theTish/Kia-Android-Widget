@@ -149,6 +149,15 @@
                         android:textSize="13sp"
                         tools:text="150 m from where the car parked" />
 
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:layout_marginEnd="8dp"
+                        android:text="@string/geofence_radius_note"
+                        android:textColor="@color/text_muted"
+                        android:textSize="12sp" />
+
                 </LinearLayout>
 
                 <ImageButton

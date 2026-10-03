@@ -181,11 +181,18 @@ object KiaSettings {
     /**
      * Bounds on the ring.
      *
-     * Below 75m a GPS fix good enough to pass the accuracy check can still
-     * wander out of it while you sit in the car. Above 500m you have driven
-     * somewhere, and a lock command is chasing a car that has moved.
+     * 25m is deliberately smaller than a fix is usually accurate to. That used
+     * to be the argument for a 75m floor - a fix can wander out of a small ring
+     * while you sit in the car - but the evaluator now requires the gap to
+     * clear the ring by the fix's own margin of error, so a ring smaller than
+     * the fix simply never fires rather than firing wrongly. What it buys is
+     * the case this was always for: a car on the drive and its owner indoors,
+     * thirty metres away.
+     *
+     * Above 500m you have driven somewhere, and a lock command is chasing a car
+     * that has moved.
      */
-    const val MIN_RADIUS_METRES = 75
+    const val MIN_RADIUS_METRES = 25
     const val MAX_RADIUS_METRES = 500
 
     /** Presentation, not connection, so it is read on its own rather than through KiaConfig. */
