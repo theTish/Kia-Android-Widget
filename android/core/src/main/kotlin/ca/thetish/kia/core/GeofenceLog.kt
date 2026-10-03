@@ -42,6 +42,8 @@ object GeofenceLog {
     private const val KEY_POLLED_FOR = "live_polled_for"
     private const val KEY_POLLED_AT = "live_polled_at"
     private const val KEY_CHECKED_AT = "checked_at"
+    private const val KEY_CHASING_FOR = "chasing_for"
+    private const val KEY_CHASES = "chases"
 
     /** Long enough that crossing a ring repeatedly cannot wake the car repeatedly. */
     private const val MIN_LIVE_POLL_GAP_MS = 20 * 60 * 1000L
@@ -78,6 +80,27 @@ object GeofenceLog {
             .edit()
             .putLong(KEY_POLLED_FOR, carReportedAt)
             .putLong(KEY_POLLED_AT, now)
+            .apply()
+    }
+
+    /**
+     * How many close-together checks have already been spent on this parking.
+     *
+     * Counted per car position report, so a new parking starts again, and
+     * capped by the caller: the point is to watch an unlocked car for the few
+     * minutes in which somebody walks away from it, not to poll all evening.
+     */
+    fun chases(context: Context, carReportedAt: Long): Int {
+        val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        if (prefs.getLong(KEY_CHASING_FOR, 0L) != carReportedAt) return 0
+        return prefs.getInt(KEY_CHASES, 0)
+    }
+
+    fun recordChase(context: Context, carReportedAt: Long, count: Int) {
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(KEY_CHASING_FOR, carReportedAt)
+            .putInt(KEY_CHASES, count)
             .apply()
     }
 

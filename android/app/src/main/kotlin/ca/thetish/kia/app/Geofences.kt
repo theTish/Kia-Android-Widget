@@ -347,7 +347,39 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
             }
         }
 
+        chase(app, status, outcome.decision)
+
         return Result.success()
+    }
+
+    /**
+     * Keeps looking for a few minutes while the car sits there unlocked.
+     *
+     * The ring is a poor trigger for the case this feature was written for.
+     * Play Services will not take a fence under about 80m, and a car on the
+     * drive is thirty metres from its owner indoors, so crossing the ring
+     * never happens and the next look is whenever the poll comes round - an
+     * hour of the car standing open, which is not worth having.
+     *
+     * An unlocked, parked car is its own trigger: it is the only state from
+     * which a lock can ever follow, it ends the moment anybody locks the car,
+     * and walking away from one takes a couple of minutes. So it is watched
+     * every three minutes for half an hour, counted per parking so a car left
+     * unlocked all evening settles back to the hourly poll rather than being
+     * chased until the battery notices.
+     */
+    private fun chase(app: Context, status: VehicleStatus?, decision: GeofenceDecision) {
+        // Lock: decided. Waiting: already coming back for the dwell.
+        if (decision is GeofenceDecision.Lock || decision is GeofenceDecision.Waiting) return
+        if (status?.isLocked != false) return
+        if (status.poweredOn == true) return
+
+        val carReportedAt = positionReportedAt(status)
+        val spent = GeofenceLog.chases(app, carReportedAt)
+        if (spent >= MAX_CHASES) return
+
+        GeofenceLog.recordChase(app, carReportedAt, spent + 1)
+        enqueue(app, delaySeconds = CHASE_SECONDS)
     }
 
     private fun evaluate(
@@ -464,6 +496,12 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
          * One unique name, REPLACE: a second exit while a dwell re-check is
          * pending should restart the reasoning, not race it.
          */
+        /** Three minutes: fast enough to catch a walk indoors, slow enough to be unnoticeable. */
+        private const val CHASE_SECONDS = 180
+
+        /** Half an hour of them. After that the hourly poll is enough. */
+        private const val MAX_CHASES = 10
+
         fun enqueue(context: Context, delaySeconds: Int) {
             val request = OneTimeWorkRequestBuilder<GeofenceWorker>()
                 .setInitialDelay(delaySeconds.toLong(), TimeUnit.SECONDS)
