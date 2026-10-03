@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Only to read which paired device just disconnected. Nothing here scans,
+         advertises, or opens a connection. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <application
         android:allowBackup="false"
@@ -38,11 +41,17 @@
             android:exported="false"
             android:label="@string/settings_title" />
 
-        <!-- Play Services delivers exits here. Not exported: the only sender
-             is the PendingIntent this app handed it. -->
+        <!-- The car's Bluetooth going and coming back. Both actions are exempt
+             from the background broadcast restrictions, so they arrive with the
+             app closed, which is the only way auto-lock works at all. -->
         <receiver
-            android:name=".GeofenceReceiver"
-            android:exported="false" />
+            android:name=".CarBluetoothReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+                <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
+            </intent-filter>
+        </receiver>
 
         <activity
             android:name=".ClimateActivity"

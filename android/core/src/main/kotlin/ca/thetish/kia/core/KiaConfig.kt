@@ -60,6 +60,8 @@ object KiaSettings {
     private const val KEY_WIDGET_BACKGROUND = "widget_background"
     private const val KEY_GEOFENCE_MODE = "geofence_mode"
     private const val KEY_GEOFENCE_RADIUS = "geofence_radius"
+    private const val KEY_CAR_BLUETOOTH = "car_bluetooth"
+    private const val KEY_CAR_BLUETOOTH_NAME = "car_bluetooth_name"
 
     /** Offered in the UI so switching hosts does not mean typing a URL. */
     val KNOWN_HOSTS = listOf(
@@ -163,6 +165,38 @@ object KiaSettings {
     fun saveGeofenceMode(context: Context, mode: GeofenceMode) {
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .edit().putString(KEY_GEOFENCE_MODE, mode.name).apply()
+    }
+
+    /**
+     * Which paired device is the car.
+     *
+     * Auto-lock turns on this: the disconnect from this address is what says
+     * the car has been switched off, and the phone's position at that moment is
+     * the only trustworthy answer to where the car is. Stored by address
+     * because a name can change; the name is kept beside it only to show.
+     */
+    fun carBluetooth(context: Context): String? =
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString(KEY_CAR_BLUETOOTH, null)
+            ?.takeIf { it.isNotBlank() }
+
+    fun carBluetoothName(context: Context): String? =
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString(KEY_CAR_BLUETOOTH_NAME, null)
+            ?.takeIf { it.isNotBlank() }
+
+    fun saveCarBluetooth(context: Context, address: String?, name: String?) {
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CAR_BLUETOOTH, address)
+            .putString(KEY_CAR_BLUETOOTH_NAME, name)
+            .apply()
+    }
+
+    /** Case-insensitive: Android spells an address in capitals, people do not. */
+    fun isCarBluetooth(context: Context, address: String?): Boolean {
+        val car = carBluetooth(context) ?: return false
+        return address != null && address.equals(car, ignoreCase = true)
     }
 
     /** How far from the car counts as having left it. */

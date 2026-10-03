@@ -114,6 +114,58 @@
                 android:textSize="12sp"
                 tools:text="Last checked 7:12 p.m." />
 
+            <!-- Which paired device is the car. Without it there is no
+                 trigger, so it sits above everything else. -->
+            <LinearLayout
+                android:id="@+id/car_device"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="22dp"
+                android:background="@drawable/card"
+                android:baselineAligned="false"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:paddingStart="18dp"
+                android:paddingTop="16dp"
+                android:paddingEnd="18dp"
+                android:paddingBottom="16dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="@font/manrope_semibold"
+                        android:text="@string/geofence_car_device"
+                        android:textColor="@color/text"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:id="@+id/car_device_value"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textColor="@color/text_dim"
+                        android:textSize="13sp"
+                        tools:text="Kia EV6" />
+
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:contentDescription="@null"
+                    android:rotation="180"
+                    android:src="@drawable/ic_back"
+                    android:tint="@color/text_muted" />
+
+            </LinearLayout>
+
             <!-- Ring size -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -124,7 +176,8 @@
                 android:paddingStart="18dp"
                 android:paddingTop="10dp"
                 android:paddingEnd="10dp"
-                android:paddingBottom="10dp">
+                android:paddingBottom="10dp"
+                tools:ignore="UselessParent">
 
                 <LinearLayout
                     android:layout_width="0dp"
