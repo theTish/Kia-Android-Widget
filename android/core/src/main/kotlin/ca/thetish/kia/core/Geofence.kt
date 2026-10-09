@@ -199,10 +199,18 @@ object Geofence {
 
         if (anchor == null) return hold(state, "no disconnect to measure from")
 
+        // Whether the reading describes this parking at all. Kia's cache still
+        // holds the drive, or the parking before it, for a while after the
+        // Bluetooth drops, and its "on" or "locked" is about then, not now.
+        val thisParking = readingAt != null && readingAt >= anchor.atMillis
+
         // A car that is running is a car somebody is using, or one deliberately
         // left warming up. Either way it is not one to lock behind them, and
         // this is the cheapest refusal available: no fix, no distance, no call.
-        if (carIsOn == true) return hold(state.beside(), "the car is on")
+        // An "on" from before the disconnect is the drive that just ended; it
+        // goes on to the lock question, which will not act without a reading
+        // taken since.
+        if (carIsOn == true && thisParking) return hold(state.beside(), "the car is on")
 
         if (fix == null) return hold(state, "no position fix")
         if (fix.accuracyMetres > MAX_ACCURACY_METRES) {
@@ -252,8 +260,12 @@ object Geofence {
         if (carIsLocked == null) return hold(state, "lock state unknown")
 
         val readingAge = readingAt?.let { now - it }
-        if (readingAge == null || readingAge > MAX_READING_AGE_MS) {
-            val age = readingAge?.let { "${hours(it)} old" } ?: "of unknown age"
+        if (readingAge == null || readingAge > MAX_READING_AGE_MS || !thisParking) {
+            val age = when {
+                readingAge == null -> "of unknown age"
+                readingAge > MAX_READING_AGE_MS -> "${hours(readingAge)} old"
+                else -> "from before the car was parked"
+            }
             return if (allowRefresh) {
                 GeofenceOutcome(
                     GeofenceDecision.Refresh("the lock reading is $age - asking the car"),
@@ -288,6 +300,20 @@ object Geofence {
             ),
             GeofenceState(awaySince = 0L, actedOnAnchorAt = anchor.atMillis),
         )
+    }
+
+    /**
+     * Whether a reading settles this parking, so there is nothing left to watch.
+     *
+     * Locked, or switched back on - but only if the car said so after its
+     * Bluetooth dropped. Straight after the disconnect Kia's cache is still the
+     * drive, or the parking before it, which was usually a locked car; taking
+     * that at its word stopped the watch on its first look, before anybody had
+     * got out, and nothing was ever locked.
+     */
+    fun settles(anchor: Anchor, carIsLocked: Boolean?, carIsOn: Boolean?, readingAt: Long?): Boolean {
+        if (readingAt == null || readingAt < anchor.atMillis) return false
+        return carIsLocked == true || carIsOn == true
     }
 
     /**

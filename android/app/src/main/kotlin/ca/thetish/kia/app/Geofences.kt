@@ -283,7 +283,7 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
             }
         }
 
-        watchAgain(app, anchor.atMillis, status, outcome.decision)
+        watchAgain(app, anchor, status, outcome.decision)
         return Result.success()
     }
 
@@ -291,23 +291,25 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
      * Comes back in a minute, while there is still a question to answer.
      *
      * It stops as soon as the answer cannot change: a decision made, the car
-     * locked by anyone, or the car switched back on. Otherwise a count bounds
-     * it, so a car left unlocked all evening is watched for half an hour and
-     * then left alone.
+     * locked by anyone, or the car switched back on - each only as the car
+     * reported it since the disconnect; see [Geofence.settles]. Otherwise a
+     * count bounds it, so a car left unlocked all evening is watched for half
+     * an hour and then left alone.
      */
     private fun watchAgain(
         app: Context,
-        anchorAt: Long,
+        anchor: Anchor,
         status: VehicleStatus?,
         decision: GeofenceDecision,
     ) {
         if (decision is GeofenceDecision.Lock) return
-        if (status?.isLocked == true || status?.poweredOn == true) return
+        val readingAt = status?.lastUpdated?.let { parseTime(it) }
+        if (Geofence.settles(anchor, status?.isLocked, status?.poweredOn, readingAt)) return
 
-        val spent = GeofenceLog.chases(app, anchorAt)
+        val spent = GeofenceLog.chases(app, anchor.atMillis)
         if (spent >= Geofences.WATCH_LIMIT) return
 
-        GeofenceLog.recordChase(app, anchorAt, spent + 1)
+        GeofenceLog.recordChase(app, anchor.atMillis, spent + 1)
         Geofences.check(app, delaySeconds = Geofences.WATCH_INTERVAL_SECONDS)
     }
 

@@ -1,6 +1,7 @@
 package ca.thetish.kia.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -319,6 +320,73 @@ class GeofenceTest {
             at = later,
             readingAt = later,
         )
+        assertTrue(out.decision is GeofenceDecision.Lock)
+    }
+
+    // ── readings from before the disconnect ──
+
+    @Test
+    fun `an on from the drive that just ended does not hold`() {
+        // Kia's cache straight after parking: the car as it was while driven.
+        val decision = evaluate(on = true, readingAt = now - 2 * 60_000L, allowRefresh = true).decision
+        assertTrue(decision is GeofenceDecision.Refresh)
+        assertTrue(decision.reason.contains("before the car was parked"))
+    }
+
+    @Test
+    fun `a recent reading from before the parking is not acted on`() {
+        // Fresh by the clock, but it predates the disconnect, so it says
+        // nothing about whether this parking ended locked.
+        val decision = evaluate(readingAt = now - 2 * 60_000L).decision
+        assertTrue(decision is GeofenceDecision.Hold)
+        assertTrue(decision.reason.contains("before the car was parked"))
+    }
+
+    @Test
+    fun `a stale locked reading does not end the watch`() {
+        // The 2026-10-09 failure: the previous parking's "locked" stopped the
+        // watch on its first look, while the phone was still in the car.
+        val parked = anchor(at = now)
+        assertFalse(Geofence.settles(parked, carIsLocked = true, carIsOn = false, readingAt = now - 3_600_000L))
+        assertFalse(Geofence.settles(parked, carIsLocked = false, carIsOn = true, readingAt = now - 60_000L))
+        assertFalse(Geofence.settles(parked, carIsLocked = true, carIsOn = false, readingAt = null))
+    }
+
+    @Test
+    fun `a locked or running car since the disconnect ends the watch`() {
+        val parked = anchor(at = now)
+        assertTrue(Geofence.settles(parked, carIsLocked = true, carIsOn = false, readingAt = now + 60_000L))
+        assertTrue(Geofence.settles(parked, carIsLocked = false, carIsOn = true, readingAt = now + 60_000L))
+        assertFalse(Geofence.settles(parked, carIsLocked = false, carIsOn = false, readingAt = now + 60_000L))
+    }
+
+    @Test
+    fun `park with a stale cache, get out, walk away`() {
+        // What the phone actually sees: Kia still reports the last parking,
+        // locked, until the car is asked directly.
+        val parked = anchor(at = now)
+        val stale = now - 3_600_000L
+        var state = GeofenceState()
+        var t = now
+
+        var out = Geofence.evaluate(t, parked, true, false, fixAt(3.0, at = t), state, readingAt = stale, allowRefresh = true)
+        assertTrue(out.decision is GeofenceDecision.Hold)
+        assertFalse(Geofence.settles(parked, true, false, stale))
+        state = out.state
+
+        // A minute later, out of the car: the cache is useless, so ask.
+        t += 60_000L
+        out = Geofence.evaluate(t, parked, true, false, fixAt(150.0, at = t), state, readingAt = stale, allowRefresh = true)
+        assertTrue(out.decision is GeofenceDecision.Refresh)
+        // The live answer: open.
+        out = Geofence.evaluate(t, parked, false, false, fixAt(150.0, at = t), state, readingAt = t)
+        assertTrue(out.decision is GeofenceDecision.Waiting)
+        state = out.state
+
+        // The next look reads Kia's cache again, now carrying the live poll.
+        val polledAt = t
+        t += 60_000L
+        out = Geofence.evaluate(t, parked, false, false, fixAt(250.0, at = t), state, readingAt = polledAt)
         assertTrue(out.decision is GeofenceDecision.Lock)
     }
 
