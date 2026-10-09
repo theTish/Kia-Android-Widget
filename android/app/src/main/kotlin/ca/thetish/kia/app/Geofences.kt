@@ -304,7 +304,13 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
     ) {
         if (decision is GeofenceDecision.Lock) return
         val readingAt = status?.lastUpdated?.let { parseTime(it) }
-        if (Geofence.settles(anchor, status?.isLocked, status?.poweredOn, readingAt)) return
+        if (Geofence.settles(anchor, status?.isLocked, status?.poweredOn, readingAt)) {
+            // Said out loud: a silent return here is what hid this watch
+            // stopping on its first look for a week.
+            val what = if (status?.isLocked == true) "locked" else "on"
+            log(GeofenceEntry.OUTCOME_HOLD, "stopped watching: the car reads $what", acted = false)
+            return
+        }
 
         val spent = GeofenceLog.chases(app, anchor.atMillis)
         if (spent >= Geofences.WATCH_LIMIT) return
