@@ -162,7 +162,7 @@
     <!-- Auto-lock -->
     <string name="geofence_title">Auto-lock</string>
     <string name="geofence_channel">Auto-lock</string>
-    <string name="geofence_explainer">Locks the car when you have walked away from it. The ring is drawn around where the car itself says it parked, not around your phone, so it works the same on the drive and at the far end of a car park.</string>
+    <string name="geofence_explainer">Locks the car when you have walked away from it. The ring is drawn around where your phone was when the car\'s Bluetooth dropped, and the lock is sent once you have been outside it for a minute, whether or not the car was already locked.</string>
     <string name="geofence_off">Off</string>
     <string name="geofence_shadow">Shadow</string>
     <string name="geofence_armed">Armed</string>
@@ -189,8 +189,8 @@
     <string name="geofence_entry_when">%1$s · %2$s</string>
     <string name="geofence_entry_hold">Did nothing: %1$s</string>
     <string name="geofence_entry_sent">Lock sent to the car</string>
-    <string name="geofence_locked_title">EV6 locked</string>
-    <string name="geofence_locked_text">Locked automatically — you were %1$d m away</string>
+    <string name="geofence_locked_title">EV6 lock sent</string>
+    <string name="geofence_locked_text">Sent automatically — you were %1$d m away</string>
     <string name="label_geofence">Auto-lock</string>
     <string name="geofence_summary_off">Off</string>
     <string name="geofence_summary_shadow">Shadow — deciding, not acting</string>

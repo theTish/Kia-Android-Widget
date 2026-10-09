@@ -33,7 +33,6 @@ class GeofenceTest {
 
     private fun evaluate(
         anchor: Anchor? = anchor(),
-        locked: Boolean? = false,
         on: Boolean? = false,
         fix: PhoneFix? = fixAt(400.0),
         state: GeofenceState = GeofenceState(),
@@ -41,18 +40,15 @@ class GeofenceTest {
         // A reading as fresh as the evaluation unless a test says otherwise:
         // the age rules have their own cases below.
         readingAt: Long? = at,
-        allowRefresh: Boolean = false,
         radius: Int = Geofence.DEFAULT_RADIUS_METRES,
     ) = Geofence.evaluate(
         now = at,
         anchor = anchor,
-        carIsLocked = locked,
         carIsOn = on,
         fix = fix,
         state = state,
         radiusMetres = radius,
         readingAt = readingAt,
-        allowRefresh = allowRefresh,
     )
 
     // ── distance ──
@@ -90,7 +86,7 @@ class GeofenceTest {
 
     @Test
     fun `running beats every other reason to fire`() {
-        // Dwell served, well away, unlocked, fresh reading: everything this
+        // Dwell served, well away, fresh reading: everything this
         // needs to lock, except that somebody has the car running.
         val outcome = evaluate(on = true, state = GeofenceState(awaySince = now - 10 * 60 * 1000L))
         assertTrue(outcome.decision is GeofenceDecision.Hold)
@@ -174,69 +170,6 @@ class GeofenceTest {
         ).decision
         assertTrue(decision is GeofenceDecision.Hold)
         assertTrue(decision.reason.contains("further than getting out explains"))
-    }
-
-    // ── the lock state ──
-
-    @Test
-    fun `holds when the lock state is unknown`() {
-        val decision = evaluate(locked = null).decision
-        assertTrue(decision is GeofenceDecision.Hold)
-        assertEquals("lock state unknown", decision.reason)
-    }
-
-    @Test
-    fun `holds when the car is already locked`() {
-        val decision = evaluate(locked = true).decision
-        assertTrue(decision is GeofenceDecision.Hold)
-        assertEquals("already locked", decision.reason)
-    }
-
-    @Test
-    fun `being locked resets the clock`() {
-        val out = evaluate(locked = true, state = GeofenceState(awaySince = now))
-        assertEquals(0L, out.state.awaySince)
-    }
-
-    // ── how old the lock reading is ──
-
-    @Test
-    fun `asks the car when the reading is too old to act on`() {
-        val decision = evaluate(
-            readingAt = now - 40 * 60 * 1000L,
-            allowRefresh = true,
-        ).decision
-        assertTrue(decision is GeofenceDecision.Refresh)
-        assertTrue(decision.reason.contains("40m old"))
-    }
-
-    @Test
-    fun `refuses when the live reading comes back stale too`() {
-        val decision = evaluate(
-            readingAt = now - 40 * 60 * 1000L,
-            allowRefresh = false,
-        ).decision
-        assertTrue(decision is GeofenceDecision.Hold)
-    }
-
-    @Test
-    fun `refuses a reading with no timestamp at all`() {
-        val decision = evaluate(readingAt = null).decision
-        assertTrue(decision is GeofenceDecision.Hold)
-        assertTrue(decision.reason.contains("unknown age"))
-    }
-
-    @Test
-    fun `a stale reading beside the car is not worth a poll`() {
-        // The lock question is only asked once you are clear of the car, so
-        // this holds on distance without waking anything.
-        val decision = evaluate(
-            fix = fixAt(10.0),
-            readingAt = now - 40 * 60 * 1000L,
-            allowRefresh = true,
-        ).decision
-        assertTrue(decision is GeofenceDecision.Hold)
-        assertTrue(decision.reason.contains("ring"))
     }
 
     // ── the dwell ──
@@ -328,65 +261,45 @@ class GeofenceTest {
     @Test
     fun `an on from the drive that just ended does not hold`() {
         // Kia's cache straight after parking: the car as it was while driven.
-        val decision = evaluate(on = true, readingAt = now - 2 * 60_000L, allowRefresh = true).decision
-        assertTrue(decision is GeofenceDecision.Refresh)
-        assertTrue(decision.reason.contains("before the car was parked"))
+        val decision = evaluate(on = true, readingAt = now - 2 * 60_000L).decision
+        assertTrue(decision is GeofenceDecision.Waiting)
     }
 
     @Test
-    fun `a recent reading from before the parking is not acted on`() {
-        // Fresh by the clock, but it predates the disconnect, so it says
-        // nothing about whether this parking ended locked.
-        val decision = evaluate(readingAt = now - 2 * 60_000L).decision
-        assertTrue(decision is GeofenceDecision.Hold)
-        assertTrue(decision.reason.contains("before the car was parked"))
+    fun `a reading with no timestamp does not hold`() {
+        val decision = evaluate(on = true, readingAt = null).decision
+        assertTrue(decision is GeofenceDecision.Waiting)
     }
 
     @Test
-    fun `a stale locked reading does not end the watch`() {
-        // The 2026-10-09 failure: the previous parking's "locked" stopped the
+    fun `only a running car since the disconnect ends the watch`() {
+        // The 2026-10-09 failure: a reading from before the parking stopped the
         // watch on its first look, while the phone was still in the car.
         val parked = anchor(at = now)
-        assertFalse(Geofence.settles(parked, carIsLocked = true, carIsOn = false, readingAt = now - 3_600_000L))
-        assertFalse(Geofence.settles(parked, carIsLocked = false, carIsOn = true, readingAt = now - 60_000L))
-        assertFalse(Geofence.settles(parked, carIsLocked = true, carIsOn = false, readingAt = null))
-    }
-
-    @Test
-    fun `a locked or running car since the disconnect ends the watch`() {
-        val parked = anchor(at = now)
-        assertTrue(Geofence.settles(parked, carIsLocked = true, carIsOn = false, readingAt = now + 60_000L))
-        assertTrue(Geofence.settles(parked, carIsLocked = false, carIsOn = true, readingAt = now + 60_000L))
-        assertFalse(Geofence.settles(parked, carIsLocked = false, carIsOn = false, readingAt = now + 60_000L))
+        assertFalse(Geofence.settles(parked, carIsOn = true, readingAt = now - 60_000L))
+        assertFalse(Geofence.settles(parked, carIsOn = true, readingAt = null))
+        assertFalse(Geofence.settles(parked, carIsOn = false, readingAt = now + 60_000L))
+        assertTrue(Geofence.settles(parked, carIsOn = true, readingAt = now + 60_000L))
     }
 
     @Test
     fun `park with a stale cache, get out, walk away`() {
-        // What the phone actually sees: Kia still reports the last parking,
-        // locked, until the car is asked directly.
+        // 2026-10-09: Kia still reported the drive when the Bluetooth dropped,
+        // and never caught up. The lock goes out on distance alone.
         val parked = anchor(at = now)
         val stale = now - 3_600_000L
         var state = GeofenceState()
         var t = now
 
-        var out = Geofence.evaluate(t, parked, true, false, fixAt(3.0, at = t), state, readingAt = stale, allowRefresh = true)
+        var out = Geofence.evaluate(t, parked, true, fixAt(3.0, at = t), state, readingAt = stale)
         assertTrue(out.decision is GeofenceDecision.Hold)
-        assertFalse(Geofence.settles(parked, true, false, stale))
         state = out.state
 
-        // A minute later, out of the car: the cache is useless, so ask.
-        t += 60_000L
-        out = Geofence.evaluate(t, parked, true, false, fixAt(150.0, at = t), state, readingAt = stale, allowRefresh = true)
-        assertTrue(out.decision is GeofenceDecision.Refresh)
-        // The live answer: open.
-        out = Geofence.evaluate(t, parked, false, false, fixAt(150.0, at = t), state, readingAt = t)
-        assertTrue(out.decision is GeofenceDecision.Waiting)
-        state = out.state
-
-        // The next look reads Kia's cache again, now carrying the live poll.
-        val polledAt = t
-        t += 60_000L
-        out = Geofence.evaluate(t, parked, false, false, fixAt(250.0, at = t), state, readingAt = polledAt)
+        for (d in listOf(150.0, 250.0)) {
+            t += 60_000L
+            out = Geofence.evaluate(t, parked, true, fixAt(d, at = t), state, readingAt = stale)
+            state = out.state
+        }
         assertTrue(out.decision is GeofenceDecision.Lock)
     }
 
@@ -401,7 +314,7 @@ class GeofenceTest {
 
         // Still in the car when the Bluetooth drops.
         var out = Geofence.evaluate(
-            t, parked, false, false, fixAt(3.0, at = t), state, readingAt = t,
+            t, parked, false, fixAt(3.0, at = t), state, readingAt = t,
         )
         assertTrue(out.decision is GeofenceDecision.Hold)
         state = out.state
@@ -411,7 +324,7 @@ class GeofenceTest {
         for (d in listOf(90.0, 160.0, 240.0)) {
             t += step
             out = Geofence.evaluate(
-                t, parked, false, false, fixAt(d, at = t), state, readingAt = t,
+                t, parked, false, fixAt(d, at = t), state, readingAt = t,
             )
             state = out.state
             seen += out.decision
@@ -434,7 +347,7 @@ class GeofenceTest {
         repeat(5) {
             t += 60_000L
             val out = Geofence.evaluate(
-                t, parked, false, false, fixAt(2.0, at = t), state, readingAt = t,
+                t, parked, false, fixAt(2.0, at = t), state, readingAt = t,
             )
             state = out.state
             assertTrue(out.decision is GeofenceDecision.Hold)
