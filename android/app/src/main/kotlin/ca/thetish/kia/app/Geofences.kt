@@ -25,11 +25,9 @@ import ca.thetish.kia.core.GeofenceDecision
 import ca.thetish.kia.core.GeofenceEntry
 import ca.thetish.kia.core.GeofenceLog
 import ca.thetish.kia.core.GeofenceMode
-import ca.thetish.kia.core.GeofenceOutcome
 import ca.thetish.kia.core.KiaApi
 import ca.thetish.kia.core.KiaSettings
 import ca.thetish.kia.core.PhoneFix
-import ca.thetish.kia.core.VehicleStatus
 import ca.thetish.kia.core.R as CoreR
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -55,8 +53,11 @@ import kotlin.coroutines.resume
  *    in the car. Kia's reported position is not used at all: it goes stale the
  *    moment the car is driven, with nothing in the payload to say so, and on
  *    2026-10-02 that put the phone "1842m" from a car it was inside.
- *  - a reason to start watching. While the car sits there unlocked, the phone
- *    is checked once a minute to see whether it has actually gone.
+ *  - a reason to start watching. Once a minute the phone checks whether it
+ *    has actually gone, and when it has, the lock is sent. Kia is not asked
+ *    whether the car is already locked: its cache still described the parking
+ *    before for a while after the disconnect, and on 2026-10-09 that ended the
+ *    watch before anybody had got out. Locking a locked car costs nothing.
  *
  * Nothing here decides anything. [Geofence] does, in :core, where it can be
  * tested without a car; this file is the plumbing that feeds it and the switch
@@ -68,7 +69,7 @@ object Geofences {
     private const val ANCHOR_WORK = "kia-anchor"
 
     /**
-     * How often to look while the car sits there unlocked.
+     * How often to look after the car is switched off.
      *
      * A minute is short enough to catch the walk indoors and long enough that
      * nobody notices it on the battery. It also matches the dwell, so an
@@ -79,10 +80,11 @@ object Geofences {
     /**
      * How many of those to spend on one parking.
      *
-     * Walking away takes a minute or two; half an hour covers unloading the
-     * boot first, and stops well short of watching an unlocked car all evening.
+     * Walking away takes a minute or two; an hour covers unloading the boot,
+     * or sitting in the car on a call first, and stops well short of watching
+     * all evening.
      */
-    const val WATCH_LIMIT = 30
+    const val WATCH_LIMIT = 60
 
     /** Starts a look. The receiver gets about ten seconds of CPU; a status call can take twenty-five. */
     fun check(context: Context, delaySeconds: Int = 0) {
@@ -205,9 +207,9 @@ class AnchorWorker(context: Context, params: WorkerParameters) :
 }
 
 /**
- * Takes a fix, asks the car, and writes down what it decided.
+ * Takes a fix, decides, and writes down what it decided.
  *
- * Runs once a minute while the car sits there unlocked, because the dwell wants
+ * Runs once a minute after the car is switched off, because the dwell wants
  * a second opinion: the first reading clear of the anchor only starts a clock,
  * so a fix that wanders across the road and back never gets as far as a lock.
  */
@@ -227,37 +229,29 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
         // car has not been parked since this was switched on.
         val anchor = GeofenceLog.anchor(app) ?: return Result.success()
 
-        var status = withContext(Dispatchers.IO) { KiaApi.status(KiaSettings.load(app)) }.status
         val fix = currentFix(app)
-
         val now = System.currentTimeMillis()
         GeofenceLog.recordCheck(app, now)
 
-        val mayPoll = GeofenceLog.mayPollLive(app, anchor.atMillis, now)
-        var outcome = evaluate(app, anchor, status, fix, allowRefresh = mayPoll)
+        val before = GeofenceLog.loadState(app)
+        val outcome = Geofence.evaluate(
+            anchor = anchor,
+            fix = fix,
+            state = before,
+            radiusMetres = KiaSettings.geofenceRadius(app),
+        )
 
-        // Kia's cached answer was too old to decide on. Wake the car, and take
-        // whatever it says as final - a second stale answer is refused rather
-        // than chased.
-        if (outcome.decision is GeofenceDecision.Refresh) {
-            log(GeofenceEntry.OUTCOME_HOLD, outcome.decision.reason, acted = false)
-            GeofenceLog.recordLivePoll(app, anchor.atMillis, now)
-            status = withContext(Dispatchers.IO) { KiaApi.statusLive(KiaSettings.load(app)) }.status
-            outcome = evaluate(app, anchor, status, fix, allowRefresh = false)
-        }
-        GeofenceLog.saveState(app, outcome.state)
-
+        var done = false
         when (val decision = outcome.decision) {
-            // Only reached when the live read came back stale too; the first
-            // Refresh was logged and handled above.
-            is GeofenceDecision.Refresh ->
+            is GeofenceDecision.Hold -> {
+                GeofenceLog.saveState(app, outcome.state)
                 log(GeofenceEntry.OUTCOME_HOLD, decision.reason, acted = false)
+            }
 
-            is GeofenceDecision.Hold ->
-                log(GeofenceEntry.OUTCOME_HOLD, decision.reason, acted = false)
-
-            is GeofenceDecision.Waiting ->
+            is GeofenceDecision.Waiting -> {
+                GeofenceLog.saveState(app, outcome.state)
                 log(GeofenceEntry.OUTCOME_WAITING, decision.reason, acted = false)
+            }
 
             is GeofenceDecision.Lock -> {
                 val armed = mode == GeofenceMode.ARMED
@@ -266,10 +260,14 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
                 } else {
                     false
                 }
+                // A lock that did not go through has not settled anything:
+                // keep the dwell already served and try again next minute.
+                done = sent || !armed
+                GeofenceLog.saveState(app, if (done) outcome.state else before)
                 log(
                     GeofenceEntry.OUTCOME_LOCK,
                     if (armed) {
-                        if (sent) decision.reason else "${decision.reason} - lock failed"
+                        if (sent) decision.reason else "${decision.reason} - lock failed, retrying"
                     } else {
                         "${decision.reason} (shadow: not sent)"
                     },
@@ -277,62 +275,37 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
                 )
                 if (sent) {
                     notifyLocked(decision.distanceMetres)
-                    // The widget is now showing a car it thinks is unlocked.
+                    // The widget is still showing whatever the car was before.
                     KiaWorker.enqueue(app, KiaWorker.ACTION_STATUS)
                 }
             }
         }
 
-        watchAgain(app, anchor.atMillis, status, outcome.decision)
+        if (!done) watchAgain(app, anchor.atMillis)
         return Result.success()
     }
 
     /**
-     * Comes back in a minute, while there is still a question to answer.
+     * Comes back in a minute, until the lock has gone out.
      *
-     * It stops as soon as the answer cannot change: a decision made, the car
-     * locked by anyone, or the car switched back on. Otherwise a count bounds
-     * it, so a car left unlocked all evening is watched for half an hour and
-     * then left alone.
+     * Reconnecting to the car ends it too, through [Geofences.stop]. Otherwise
+     * a count bounds it, and running out says so in the log: a watch that ends
+     * without a lock is exactly the failure that otherwise leaves no trace.
      */
-    private fun watchAgain(
-        app: Context,
-        anchorAt: Long,
-        status: VehicleStatus?,
-        decision: GeofenceDecision,
-    ) {
-        if (decision is GeofenceDecision.Lock) return
-        if (status?.isLocked == true || status?.poweredOn == true) return
-
+    private fun watchAgain(app: Context, anchorAt: Long) {
         val spent = GeofenceLog.chases(app, anchorAt)
-        if (spent >= Geofences.WATCH_LIMIT) return
+        if (spent >= Geofences.WATCH_LIMIT) {
+            log(
+                GeofenceEntry.OUTCOME_HOLD,
+                "stopped watching after ${Geofences.WATCH_LIMIT} minutes without leaving the car",
+                acted = false,
+            )
+            return
+        }
 
         GeofenceLog.recordChase(app, anchorAt, spent + 1)
         Geofences.check(app, delaySeconds = Geofences.WATCH_INTERVAL_SECONDS)
     }
-
-    private fun evaluate(
-        app: Context,
-        anchor: Anchor,
-        status: VehicleStatus?,
-        fix: PhoneFix?,
-        allowRefresh: Boolean,
-    ): GeofenceOutcome = Geofence.evaluate(
-        now = System.currentTimeMillis(),
-        anchor = anchor,
-        carIsLocked = status?.isLocked,
-        carIsOn = status?.poweredOn,
-        fix = fix,
-        state = GeofenceLog.loadState(app),
-        radiusMetres = KiaSettings.geofenceRadius(app),
-        readingAt = status?.lastUpdated?.let { parseTime(it) },
-        allowRefresh = allowRefresh,
-    )
-
-    /** One of /status's ISO timestamps, or null if it is not one. */
-    private fun parseTime(iso: String): Long? = runCatching {
-        java.time.OffsetDateTime.parse(iso).toInstant().toEpochMilli()
-    }.getOrNull()
 
     private fun log(outcome: String, reason: String, acted: Boolean) {
         GeofenceLog.append(

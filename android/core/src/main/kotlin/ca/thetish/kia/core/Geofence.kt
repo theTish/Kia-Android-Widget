@@ -63,18 +63,8 @@ sealed interface GeofenceDecision {
     /** Away from the car, but not for long enough yet. */
     data class Waiting(override val reason: String) : GeofenceDecision
 
-    /** Walked away from an unlocked car. */
+    /** Walked away from the car. */
     data class Lock(override val reason: String, val distanceMetres: Int) : GeofenceDecision
-
-    /**
-     * Away from the car, but the lock reading is too old to act on.
-     *
-     * The caller is expected to ask the car itself and evaluate again. Kia
-     * serves a cached view that can be hours behind: on 2026-09-22 it reported
-     * a locked car two minutes before the owner locked it by hand, and this
-     * logged "already locked" about a car standing open.
-     */
-    data class Refresh(override val reason: String) : GeofenceDecision
 }
 
 /**
@@ -114,10 +104,16 @@ data class GeofenceOutcome(val decision: GeofenceDecision, val state: GeofenceSt
  * when the music stopped, by more than its own fix could be wrong by, and still
  * be clear a minute later.
  *
- * Every rule exists to refuse rather than to fire. Locking a car nobody has
- * left is a nuisance at best and a lockout at worst; failing to lock one is
- * what the owner was already doing by hand. So an unknown reads as "do nothing"
- * everywhere.
+ * Kia is not asked whether the car is locked. Its answer is a cache that
+ * lags the car: straight after a disconnect it still holds the parking before,
+ * usually locked, and on 2026-10-09 taking that at its word stopped the watch
+ * on its first look and left the car open. Locking a locked car costs nothing;
+ * leaving one open is the thing this exists to stop. So once you have walked
+ * away, the lock is sent whatever Kia thinks.
+ *
+ * What is still refused is a lock while you might be in or beside the car: a
+ * vague fix, a fix that is not clear of the ring by more than it could be wrong
+ * by, or a single reading that has not been confirmed by a second.
  */
 object Geofence {
 
@@ -153,56 +149,30 @@ object Geofence {
     const val MAX_ACCURACY_METRES = 60f
 
     /**
-     * How old the lock reading may be before it is worth waking the car for.
-     *
-     * Kia answers /status from a cache the car refreshes when it feels like it,
-     * so "locked" can mean "was locked when the car last checked in". Five
-     * minutes is short enough that a reading this recent can only have come
-     * from the drive that just ended or a poll made for this decision.
-     */
-    const val MAX_READING_AGE_MS = 5 * 60 * 1000L
-
-    /**
      * A backstop, not a rule about walking.
      *
      * With the anchor coming from the phone, distance is normally beyond doubt.
      * The one way it can lie is a Bluetooth session that drops mid-drive: the
-     * anchor lands on the road and the gap grows at thirty metres a second. The
-     * car being on refuses that case first, and this catches it if Kia's idea
-     * of "on" is stale too.
+     * anchor lands on the road and the gap grows at thirty metres a second.
+     * Locking a car you are driving is harmless, but it is not a decision about
+     * a parking either.
      */
     const val MAX_PLAUSIBLE_METRES = 2_000
 
     /**
      * @param anchor where the car was when its Bluetooth dropped, or null if
      *   this phone has not seen a disconnect to measure from.
-     * @param readingAt when the car reported the state this lock reading came
-     *   from, or null if it did not say.
-     * @param allowRefresh whether a live poll is affordable right now; see
-     *   GeofenceLog.mayPollLive. False once one has been made for this decision,
-     *   so a car that answers with a stale reading anyway is refused rather than
-     *   polled in a loop.
      */
     fun evaluate(
-        now: Long,
         anchor: Anchor?,
-        carIsLocked: Boolean?,
-        carIsOn: Boolean? = null,
         fix: PhoneFix?,
         state: GeofenceState,
         radiusMetres: Int = DEFAULT_RADIUS_METRES,
         dwellSeconds: Int = DEFAULT_DWELL_SECONDS,
-        readingAt: Long? = null,
-        allowRefresh: Boolean = false,
     ): GeofenceOutcome {
         // ── Is there a question to answer? ──
 
         if (anchor == null) return hold(state, "no disconnect to measure from")
-
-        // A car that is running is a car somebody is using, or one deliberately
-        // left warming up. Either way it is not one to lock behind them, and
-        // this is the cheapest refusal available: no fix, no distance, no call.
-        if (carIsOn == true) return hold(state.beside(), "the car is on")
 
         if (fix == null) return hold(state, "no position fix")
         if (fix.accuracyMetres > MAX_ACCURACY_METRES) {
@@ -240,34 +210,6 @@ object Geofence {
             return GeofenceOutcome(GeofenceDecision.Hold("already decided for this parking"), state)
         }
 
-        // ── Is the car open? ──
-        //
-        // Asked last because it is the expensive question: the answer that
-        // matters is a live one, and there is no point waking a car you have
-        // not yet walked away from.
-
-        // An unknown lock state is not an unlocked one. This is the single most
-        // important refusal here: it is what stops a failed /status from
-        // looking like an open car.
-        if (carIsLocked == null) return hold(state, "lock state unknown")
-
-        val readingAge = readingAt?.let { now - it }
-        if (readingAge == null || readingAge > MAX_READING_AGE_MS) {
-            val age = readingAge?.let { "${hours(it)} old" } ?: "of unknown age"
-            return if (allowRefresh) {
-                GeofenceOutcome(
-                    GeofenceDecision.Refresh("the lock reading is $age - asking the car"),
-                    state,
-                )
-            } else {
-                hold(state, "the lock reading is $age")
-            }
-        }
-
-        // Locked resets the clock: whatever this was timing ended with the car
-        // shut, so the next walk starts from scratch.
-        if (carIsLocked) return hold(state.beside(), "already locked")
-
         // ── Away, and it counts ──
 
         val awaySince = if (state.awaySince == 0L) fix.atMillis else state.awaySince
@@ -283,7 +225,7 @@ object Geofence {
 
         return GeofenceOutcome(
             GeofenceDecision.Lock(
-                reason = "${metres}m away for ${awayFor / 1000}s, car unlocked",
+                reason = "${metres}m away for ${awayFor / 1000}s",
                 distanceMetres = metres,
             ),
             GeofenceState(awaySince = 0L, actedOnAnchorAt = anchor.atMillis),
@@ -310,11 +252,6 @@ object Geofence {
 
     /** Still at the car: the dwell starts again from scratch next time. */
     private fun GeofenceState.beside() = copy(awaySince = 0L)
-
-    private fun hours(millis: Long): String {
-        val h = millis / (60 * 60 * 1000L)
-        return if (h >= 1) "${h}h" else "${millis / (60 * 1000L)}m"
-    }
 
     private const val EARTH_RADIUS_METRES = 6_371_008.8
 }
