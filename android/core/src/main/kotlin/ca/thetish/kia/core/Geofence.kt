@@ -160,6 +160,20 @@ object Geofence {
     const val MAX_PLAUSIBLE_METRES = 2_000
 
     /**
+     * The latest a lock may go out after the car's Bluetooth drops.
+     *
+     * Past this the moment has gone: Kia's own app has already told you the
+     * car is open, and a lock arriving later still - after Android has held the
+     * checks back for hours - reads as the car locking itself at random. Ten
+     * minutes is generous for a walk away and still ahead of that alert.
+     */
+    const val LOCK_DEADLINE_MS = 10 * 60 * 1000L
+
+    /** Whether this parking is past [LOCK_DEADLINE_MS], so nothing more may be sent for it. */
+    fun tooLate(anchor: Anchor, now: Long, deadlineMs: Long = LOCK_DEADLINE_MS): Boolean =
+        now - anchor.atMillis > deadlineMs
+
+    /**
      * @param anchor where the car was when its Bluetooth dropped, or null if
      *   this phone has not seen a disconnect to measure from.
      */

@@ -77,15 +77,6 @@ object Geofences {
      */
     const val WATCH_INTERVAL_SECONDS = 60
 
-    /**
-     * How many of those to spend on one parking.
-     *
-     * Walking away takes a minute or two; an hour covers unloading the boot,
-     * or sitting in the car on a call first, and stops well short of watching
-     * all evening.
-     */
-    const val WATCH_LIMIT = 60
-
     /** Starts a look. The receiver gets about ten seconds of CPU; a status call can take twenty-five. */
     fun check(context: Context, delaySeconds: Int = 0) {
         val request = OneTimeWorkRequestBuilder<GeofenceWorker>()
@@ -229,9 +220,24 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
         // car has not been parked since this was switched on.
         val anchor = GeofenceLog.anchor(app) ?: return Result.success()
 
-        val fix = currentFix(app)
         val now = System.currentTimeMillis()
         GeofenceLog.recordCheck(app, now)
+
+        // Android holds background work back when the phone sits still, so a
+        // look due in a minute can run hours later. By then a lock is a
+        // surprise, not a help: give the parking up and say so.
+        if (Geofence.tooLate(anchor, now)) {
+            log(
+                GeofenceEntry.OUTCOME_HOLD,
+                "gave up: ${(now - anchor.atMillis) / 60_000}m after parking, past the " +
+                    "${Geofence.LOCK_DEADLINE_MS / 60_000}m limit",
+                acted = false,
+            )
+            GeofenceLog.clearAnchor(app)
+            return Result.success()
+        }
+
+        val fix = currentFix(app)
 
         val before = GeofenceLog.loadState(app)
         val outcome = Geofence.evaluate(
@@ -281,7 +287,7 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
             }
         }
 
-        if (!done) watchAgain(app, anchor.atMillis)
+        if (!done) watchAgain(app)
         return Result.success()
     }
 
@@ -289,21 +295,10 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
      * Comes back in a minute, until the lock has gone out.
      *
      * Reconnecting to the car ends it too, through [Geofences.stop]. Otherwise
-     * a count bounds it, and running out says so in the log: a watch that ends
-     * without a lock is exactly the failure that otherwise leaves no trace.
+     * [Geofence.LOCK_DEADLINE_MS] does: the next look past it gives the parking
+     * up and says so in the log.
      */
-    private fun watchAgain(app: Context, anchorAt: Long) {
-        val spent = GeofenceLog.chases(app, anchorAt)
-        if (spent >= Geofences.WATCH_LIMIT) {
-            log(
-                GeofenceEntry.OUTCOME_HOLD,
-                "stopped watching after ${Geofences.WATCH_LIMIT} minutes without leaving the car",
-                acted = false,
-            )
-            return
-        }
-
-        GeofenceLog.recordChase(app, anchorAt, spent + 1)
+    private fun watchAgain(app: Context) {
         Geofences.check(app, delaySeconds = Geofences.WATCH_INTERVAL_SECONDS)
     }
 

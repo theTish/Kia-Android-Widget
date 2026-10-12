@@ -1,6 +1,7 @@
 package ca.thetish.kia.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -292,5 +293,18 @@ class GeofenceTest {
         assertTrue(seen[2] is GeofenceDecision.Waiting)
         assertTrue(seen[3] is GeofenceDecision.Lock)
         assertEquals("already decided for this parking", seen[4].reason)
+    }
+
+    // ── the deadline ──
+
+    @Test
+    fun `a lock may go out up to the deadline and not after`() {
+        // 2026-10-12: Android held the checks back and locks landed hours
+        // after the walk away.
+        val parked = anchor(at = now)
+        assertFalse(Geofence.tooLate(parked, now + 60_000L))
+        assertFalse(Geofence.tooLate(parked, now + Geofence.LOCK_DEADLINE_MS))
+        assertTrue(Geofence.tooLate(parked, now + Geofence.LOCK_DEADLINE_MS + 1))
+        assertTrue(Geofence.tooLate(parked, now + 3 * 60 * 60 * 1000L))
     }
 }
