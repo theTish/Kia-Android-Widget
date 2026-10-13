@@ -162,7 +162,7 @@
     <!-- Auto-lock -->
     <string name="geofence_title">Auto-lock</string>
     <string name="geofence_channel">Auto-lock</string>
-    <string name="geofence_explainer">Locks the car when you have walked away from it. The ring is drawn around where your phone was when the car\'s Bluetooth dropped. It watches for ten minutes after parking and then stops, so a lock never turns up late.</string>
+    <string name="geofence_explainer">Locks the car when you have walked away from it. The ring is drawn around where your phone was when the car\'s Bluetooth dropped. It watches for under three minutes after parking, before Kia\'s own unlocked alert, and then stops, so a lock never turns up late.</string>
     <string name="geofence_off">Off</string>
     <string name="geofence_shadow">Shadow</string>
     <string name="geofence_armed">Armed</string>

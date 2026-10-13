@@ -80,11 +80,12 @@ object Geofences {
     /**
      * How often to look after the car is switched off.
      *
-     * A minute is short enough to catch the walk indoors and long enough that
-     * nobody notices it on the battery. It also matches the dwell, so an
-     * ordinary walk-away is two readings and done.
+     * Half the dwell, so the first reading clear of the ring comes at most
+     * half a minute after you are, and the confirm a minute after that - all
+     * inside [Geofence.LOCK_DEADLINE_MS]. A couple of minutes of GPS per
+     * parking is not something the battery notices.
      */
-    const val WATCH_INTERVAL_MS = 60_000L
+    const val WATCH_INTERVAL_MS = 30_000L
 
     /** The car's Bluetooth dropped: start watching. */
     fun start(context: Context) {
@@ -180,7 +181,7 @@ class CarBluetoothReceiver : BroadcastReceiver() {
             BluetoothDevice.ACTION_ACL_CONNECTED -> Geofences.stop(app)
 
             // Dropped: the car has been switched off. Whether anybody got out
-            // is what the next ten minutes are for.
+            // is what the next few minutes are for.
             BluetoothDevice.ACTION_ACL_DISCONNECTED -> Geofences.start(app)
         }
     }
@@ -291,8 +292,8 @@ class WatchService : Service() {
         if (Geofence.tooLate(anchor, now)) {
             Geofences.note(
                 app,
-                "gave up: ${(now - anchor.atMillis) / 60_000}m after parking, past the " +
-                    "${Geofence.LOCK_DEADLINE_MS / 60_000}m limit",
+                "gave up: ${(now - anchor.atMillis) / 1000}s after parking, past the " +
+                    "${Geofence.LOCK_DEADLINE_MS / 1000}s limit",
             )
             GeofenceLog.clearAnchor(app)
             return true

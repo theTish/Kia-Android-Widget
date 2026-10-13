@@ -170,10 +170,14 @@ object Geofence {
      *
      * Past this the moment has gone: Kia's own app has already told you the
      * car is open, and a lock arriving later still - after Android has held the
-     * checks back for hours - reads as the car locking itself at random. Ten
-     * minutes is generous for a walk away and still ahead of that alert.
+     * checks back for hours - reads as the car locking itself at random. Kia's
+     * "doors unlocked" alert came three minutes after parking on 2026-10-12;
+     * this stops fifteen seconds short of it. That leaves room for a walk of
+     * about a minute and a half before the minute-long confirm, which is an
+     * ordinary walk away. Lingering longer at the car means no auto-lock, and
+     * Kia's alert is there for that case.
      */
-    const val LOCK_DEADLINE_MS = 10 * 60 * 1000L
+    const val LOCK_DEADLINE_MS = 165 * 1000L
 
     /** Whether this parking is past [LOCK_DEADLINE_MS], so nothing more may be sent for it. */
     fun tooLate(anchor: Anchor, now: Long, deadlineMs: Long = LOCK_DEADLINE_MS): Boolean =
