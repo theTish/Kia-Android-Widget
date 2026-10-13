@@ -162,7 +162,7 @@
     <!-- Auto-lock -->
     <string name="geofence_title">Auto-lock</string>
     <string name="geofence_channel">Auto-lock</string>
-    <string name="geofence_explainer">Locks the car when you have walked away from it. The ring is drawn around where the car itself says it parked, not around your phone, so it works the same on the drive and at the far end of a car park.</string>
+    <string name="geofence_explainer">Locks the car when you have walked away from it. The ring is drawn around where your phone was when the car\'s Bluetooth dropped. It watches for under three minutes after parking, before Kia\'s own unlocked alert, and then stops, so a lock never turns up late.</string>
     <string name="geofence_off">Off</string>
     <string name="geofence_shadow">Shadow</string>
     <string name="geofence_armed">Armed</string>
@@ -174,6 +174,16 @@
     <string name="geofence_car_device_pick">Which device is the car?</string>
     <string name="geofence_car_device_empty">No paired devices. Pair the phone with the car first.</string>
     <string name="geofence_needs_bluetooth">Allow nearby device access so the car\'s Bluetooth can be seen</string>
+    <string name="geofence_home_wifi">Home Wi-Fi</string>
+    <string name="geofence_home_wifi_none">Not set — at home it waits on distance alone</string>
+    <string name="geofence_home_wifi_note">Joining it after parking counts as having gone indoors. The house is too close to the drive for distance to tell.</string>
+    <string name="geofence_home_wifi_use">Use \"%1$s\" as home?</string>
+    <string name="geofence_home_wifi_set">Use it</string>
+    <string name="geofence_home_wifi_clear">Forget it</string>
+    <string name="geofence_home_wifi_offline">Connect to the home Wi-Fi first, then tap here.</string>
+    <string name="geofence_home_wifi_current">Home is \"%1$s\".</string>
+    <string name="geofence_watching_channel">Watching after parking</string>
+    <string name="geofence_watching_title">Watching EV6</string>
     <string name="geofence_radius">Ring radius</string>
     <string name="geofence_radius_note">A small ring suits a car on the drive, and needs a confident fix to fire: a vague one is refused rather than guessed at.</string>
     <string name="geofence_radius_value">%1$d m from where the car parked</string>

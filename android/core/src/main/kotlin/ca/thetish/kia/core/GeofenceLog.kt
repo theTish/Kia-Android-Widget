@@ -40,12 +40,11 @@ object GeofenceLog {
     const val MAX_ENTRIES = 120
 
     private const val KEY_CHECKED_AT = "checked_at"
-    private const val KEY_CHASING_FOR = "chasing_for"
-    private const val KEY_CHASES = "chases"
     private const val KEY_ANCHOR_LAT = "anchor_lat"
     private const val KEY_ANCHOR_LON = "anchor_lon"
     private const val KEY_ANCHOR_ACCURACY = "anchor_accuracy"
     private const val KEY_ANCHOR_AT = "anchor_at"
+    private const val KEY_ANCHOR_WIFI = "anchor_home_wifi"
 
     private const val FILE = "kia_geofence_log"
     private const val KEY = "entries"
@@ -66,6 +65,7 @@ object GeofenceLog {
             longitude = Double.fromBits(prefs.getLong(KEY_ANCHOR_LON, 0L)),
             accuracyMetres = prefs.getFloat(KEY_ANCHOR_ACCURACY, 0f),
             atMillis = at,
+            onHomeWifi = prefs.getBoolean(KEY_ANCHOR_WIFI, false),
         )
     }
 
@@ -78,6 +78,7 @@ object GeofenceLog {
             .putLong(KEY_ANCHOR_LON, anchor.longitude.toRawBits())
             .putFloat(KEY_ANCHOR_ACCURACY, anchor.accuracyMetres)
             .putLong(KEY_ANCHOR_AT, anchor.atMillis)
+            .putBoolean(KEY_ANCHOR_WIFI, anchor.onHomeWifi)
             .apply()
     }
 
@@ -88,27 +89,7 @@ object GeofenceLog {
             .remove(KEY_ANCHOR_LON)
             .remove(KEY_ANCHOR_ACCURACY)
             .remove(KEY_ANCHOR_AT)
-            .apply()
-    }
-
-    /**
-     * How many close-together checks have already been spent on this parking.
-     *
-     * Counted per car position report, so a new parking starts again, and
-     * capped by the caller: the point is to watch an unlocked car for the few
-     * minutes in which somebody walks away from it, not to poll all evening.
-     */
-    fun chases(context: Context, anchorAt: Long): Int {
-        val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-        if (prefs.getLong(KEY_CHASING_FOR, 0L) != anchorAt) return 0
-        return prefs.getInt(KEY_CHASES, 0)
-    }
-
-    fun recordChase(context: Context, anchorAt: Long, count: Int) {
-        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-            .edit()
-            .putLong(KEY_CHASING_FOR, anchorAt)
-            .putInt(KEY_CHASES, count)
+            .remove(KEY_ANCHOR_WIFI)
             .apply()
     }
 

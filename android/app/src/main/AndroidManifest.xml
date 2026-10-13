@@ -15,6 +15,12 @@
     <!-- Only to read which paired device just disconnected. Nothing here scans,
          advertises, or opens a connection. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- The few minutes after parking are watched from a foreground service,
+         so Android runs the checks on time instead of batching them for hours. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- Only to read the name of the network the phone is on, for the home rule. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
     <application
         android:allowBackup="false"
@@ -52,6 +58,12 @@
                 <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
             </intent-filter>
         </receiver>
+
+        <!-- Watches the walk away from the car, for at most a few minutes. -->
+        <service
+            android:name=".WatchService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
 
         <activity
             android:name=".ClimateActivity"

@@ -37,6 +37,7 @@ class GeofenceActivity : Activity() {
     private lateinit var warning: TextView
     private lateinit var radiusValue: TextView
     private lateinit var carDevice: TextView
+    private lateinit var homeWifi: TextView
     private lateinit var logContainer: LinearLayout
     private lateinit var empty: TextView
 
@@ -63,6 +64,8 @@ class GeofenceActivity : Activity() {
         radiusValue = findViewById(R.id.radius_value)
         carDevice = findViewById(R.id.car_device_value)
         findViewById<View>(R.id.car_device).setOnClickListener { chooseCarDevice() }
+        homeWifi = findViewById(R.id.home_wifi_value)
+        findViewById<View>(R.id.home_wifi).setOnClickListener { chooseHomeWifi() }
         logContainer = findViewById(R.id.log)
         empty = findViewById(R.id.empty)
 
@@ -203,6 +206,36 @@ class GeofenceActivity : Activity() {
             .show()
     }
 
+    /**
+     * Home is whatever network the phone is on when this is tapped. Android
+     * hands out the name only with location granted, which auto-lock needs
+     * anyway; without it the name reads as unknown and this asks to connect.
+     */
+    private fun chooseHomeWifi() {
+        val current = Geofences.currentWifi(this)
+        val saved = KiaSettings.homeWifi(this)
+        val dialog = AlertDialog.Builder(this)
+
+        if (current != null && current != saved) {
+            dialog.setMessage(getString(R.string.geofence_home_wifi_use, current))
+                .setPositiveButton(R.string.geofence_home_wifi_set) { _, _ ->
+                    KiaSettings.saveHomeWifi(this, current)
+                    render()
+                }
+        } else if (saved != null) {
+            dialog.setMessage(getString(R.string.geofence_home_wifi_current, saved))
+        } else {
+            dialog.setMessage(R.string.geofence_home_wifi_offline)
+        }
+        if (saved != null) {
+            dialog.setNeutralButton(R.string.geofence_home_wifi_clear) { _, _ ->
+                KiaSettings.saveHomeWifi(this, null)
+                render()
+            }
+        }
+        dialog.setNegativeButton(android.R.string.cancel, null).show()
+    }
+
     // ── rendering ──
 
     private fun render() {
@@ -244,6 +277,8 @@ class GeofenceActivity : Activity() {
         carDevice.text = KiaSettings.carBluetoothName(this)
             ?: KiaSettings.carBluetooth(this)
             ?: getString(R.string.geofence_car_device_none)
+
+        homeWifi.text = KiaSettings.homeWifi(this) ?: getString(R.string.geofence_home_wifi_none)
 
         renderWarning(mode)
         renderLog()

@@ -6,35 +6,41 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
 import android.bluetooth.BluetoothDevice
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.location.Location
+import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.IBinder
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
-import androidx.work.CoroutineWorker
-import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.WorkerParameters
 import ca.thetish.kia.core.Anchor
 import ca.thetish.kia.core.Geofence
 import ca.thetish.kia.core.GeofenceDecision
 import ca.thetish.kia.core.GeofenceEntry
 import ca.thetish.kia.core.GeofenceLog
 import ca.thetish.kia.core.GeofenceMode
+import ca.thetish.kia.core.GeofenceState
 import ca.thetish.kia.core.KiaApi
 import ca.thetish.kia.core.KiaSettings
 import ca.thetish.kia.core.PhoneFix
 import ca.thetish.kia.core.R as CoreR
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
 /**
@@ -59,56 +65,52 @@ import kotlin.coroutines.resume
  *    before for a while after the disconnect, and on 2026-10-09 that ended the
  *    watch before anybody had got out. Locking a locked car costs nothing.
  *
+ * The watching happens in [WatchService], a foreground service, rather than in
+ * scheduled work. Android held scheduled checks back while the phone sat in a
+ * pocket, and locks landed ten to forty-five minutes after the walk away; a
+ * foreground service is allowed to look on time. It lives at most
+ * [Geofence.LOCK_DEADLINE_MS], so a lock is never sent later than that.
+ *
  * Nothing here decides anything. [Geofence] does, in :core, where it can be
  * tested without a car; this file is the plumbing that feeds it and the switch
  * that decides whether its answer reaches the car.
  */
 object Geofences {
 
-    private const val WORK_NAME = "kia-geofence"
-    private const val ANCHOR_WORK = "kia-anchor"
-
     /**
      * How often to look after the car is switched off.
      *
-     * A minute is short enough to catch the walk indoors and long enough that
-     * nobody notices it on the battery. It also matches the dwell, so an
-     * ordinary walk-away is two readings and done.
+     * Half the dwell, so the first reading clear of the ring comes at most
+     * half a minute after you are, and the confirm a minute after that - all
+     * inside [Geofence.LOCK_DEADLINE_MS]. A couple of minutes of GPS per
+     * parking is not something the battery notices.
      */
-    const val WATCH_INTERVAL_SECONDS = 60
+    const val WATCH_INTERVAL_MS = 30_000L
 
-    /**
-     * How many of those to spend on one parking.
-     *
-     * Walking away takes a minute or two; an hour covers unloading the boot,
-     * or sitting in the car on a call first, and stops well short of watching
-     * all evening.
-     */
-    const val WATCH_LIMIT = 60
-
-    /** Starts a look. The receiver gets about ten seconds of CPU; a status call can take twenty-five. */
-    fun check(context: Context, delaySeconds: Int = 0) {
-        val request = OneTimeWorkRequestBuilder<GeofenceWorker>()
-            .setInitialDelay(delaySeconds.toLong(), TimeUnit.SECONDS)
-            .build()
-
-        WorkManager.getInstance(context.applicationContext)
-            .enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
+    /** The car's Bluetooth dropped: start watching. */
+    fun start(context: Context) {
+        val app = context.applicationContext
+        // A location service started without location permission is refused
+        // by Android, and that refusal crashes the app.
+        if (!hasLocationPermission(app)) {
+            note(app, "location permission not granted")
+            return
+        }
+        val intent = Intent(app, WatchService::class.java)
+        try {
+            ContextCompat.startForegroundService(app, intent)
+        } catch (e: IllegalStateException) {
+            // Android refuses some background starts. Say so rather than
+            // leave a parking that silently went unwatched.
+            note(app, "could not start watching: ${e.javaClass.simpleName}")
+        }
     }
 
     /** Back in the car, or switched off: nothing left to watch for. */
     fun stop(context: Context) {
         val app = context.applicationContext
-        WorkManager.getInstance(app).cancelUniqueWork(WORK_NAME)
+        app.stopService(Intent(app, WatchService::class.java))
         GeofenceLog.clearAnchor(app)
-    }
-
-    internal fun anchorNow(context: Context) {
-        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-            ANCHOR_WORK,
-            ExistingWorkPolicy.REPLACE,
-            OneTimeWorkRequestBuilder<AnchorWorker>().build(),
-        )
     }
 
     fun hasLocationPermission(context: Context): Boolean =
@@ -128,6 +130,31 @@ object Geofences {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
                 PackageManager.PERMISSION_GRANTED
+
+    /**
+     * The Wi-Fi the phone is on now, or null if none or Android will not say.
+     *
+     * Android only names the network to an app with location permission and
+     * location switched on, which this feature needs anyway.
+     */
+    @Suppress("DEPRECATION") // the replacement needs a network callback for a one-off question
+    fun currentWifi(context: Context): String? {
+        val wifi = context.applicationContext.getSystemService(WifiManager::class.java) ?: return null
+        val ssid = runCatching { wifi.connectionInfo?.ssid }.getOrNull() ?: return null
+        return ssid.removeSurrounding("\"").takeIf { it.isNotBlank() && it != WifiManager.UNKNOWN_SSID }
+    }
+
+    fun onHomeWifi(context: Context): Boolean {
+        val home = KiaSettings.homeWifi(context) ?: return false
+        return currentWifi(context) == home
+    }
+
+    internal fun note(app: Context, reason: String) {
+        GeofenceLog.append(
+            app,
+            GeofenceEntry(System.currentTimeMillis(), GeofenceEntry.OUTCOME_HOLD, reason, false),
+        )
+    }
 }
 
 /**
@@ -135,6 +162,8 @@ object Geofences {
  *
  * These two broadcasts are exempt from the background restrictions, so they
  * still arrive with the app closed - which is the only way any of this works.
+ * Being Bluetooth broadcasts that need BLUETOOTH_CONNECT, they also let the app
+ * start a foreground service from the background.
  */
 class CarBluetoothReceiver : BroadcastReceiver() {
 
@@ -152,29 +181,73 @@ class CarBluetoothReceiver : BroadcastReceiver() {
             BluetoothDevice.ACTION_ACL_CONNECTED -> Geofences.stop(app)
 
             // Dropped: the car has been switched off. Whether anybody got out
-            // is what the next half hour is for.
-            BluetoothDevice.ACTION_ACL_DISCONNECTED -> Geofences.anchorNow(app)
+            // is what the next few minutes are for.
+            BluetoothDevice.ACTION_ACL_DISCONNECTED -> Geofences.start(app)
         }
     }
 }
 
 /**
- * Takes the fix that becomes the anchor, straight after the disconnect.
+ * Watches one parking, for at most [Geofence.LOCK_DEADLINE_MS].
  *
- * Its own worker because the timing is the whole point: the phone is still in
- * the car for a few seconds after the Bluetooth drops, and that is the only
- * moment anything here can learn where the car is. What follows is ordinary
- * watching, which [GeofenceWorker] does.
+ * Takes the anchor straight away - the phone is still in the car for a few
+ * seconds after the Bluetooth drops, and that is the only moment anything here
+ * can learn where the car is - then looks once a minute until the lock goes
+ * out, the car reconnects, or the deadline passes. The "Watching" notification
+ * is the price of looking on time, and is gone when it ends.
  */
-class AnchorWorker(context: Context, params: WorkerParameters) :
-    CoroutineWorker(context, params) {
+class WatchService : Service() {
 
-    override suspend fun doWork(): Result {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var watch: Job? = null
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        try {
+            ServiceCompat.startForeground(
+                this,
+                WATCHING_ID,
+                watchingNotification(),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                } else {
+                    0
+                },
+            )
+        } catch (e: RuntimeException) {
+            // Refused, usually a permission taken away since the last parking.
+            Geofences.note(applicationContext, "could not start watching: ${e.javaClass.simpleName}")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
+        // A second disconnect is a new parking: start over from it.
+        watch?.cancel()
+        watch = scope.launch {
+            try {
+                if (anchor()) {
+                    while (!look()) delay(Geofences.WATCH_INTERVAL_MS)
+                }
+            } finally {
+                stopSelf(startId)
+            }
+        }
+        return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    /** Takes the fix that becomes the anchor. False if there is nothing to measure from. */
+    private suspend fun anchor(): Boolean {
         val app = applicationContext
-        if (KiaSettings.geofenceMode(app) == GeofenceMode.OFF) return Result.success()
+        if (KiaSettings.geofenceMode(app) == GeofenceMode.OFF) return false
         if (!Geofences.hasLocationPermission(app)) {
-            note(app, "location permission not granted")
-            return Result.success()
+            Geofences.note(app, "location permission not granted")
+            return false
         }
 
         val fix = currentFix(app)
@@ -182,75 +255,72 @@ class AnchorWorker(context: Context, params: WorkerParameters) :
             // No anchor, so no decision for this parking. A guessed one is how
             // you lock a car somebody is still sitting in, and the log says so
             // rather than leaving a silent gap.
-            note(
+            Geofences.note(
                 app,
                 fix?.let { "left the car on a fix accurate only to ${it.accuracyMetres.toInt()}m" }
                     ?: "left the car with no position fix",
             )
-            return Result.success()
+            return false
         }
 
         GeofenceLog.saveAnchor(
             app,
-            Anchor(fix.latitude, fix.longitude, fix.accuracyMetres, System.currentTimeMillis()),
+            Anchor(
+                fix.latitude,
+                fix.longitude,
+                fix.accuracyMetres,
+                System.currentTimeMillis(),
+                onHomeWifi = Geofences.onHomeWifi(app),
+            ),
         )
-        Geofences.check(app)
-        return Result.success()
+        // A new parking starts with no dwell served. Left over from the last
+        // one, a half-served dwell would let the first look lock straight away.
+        GeofenceLog.saveState(app, GeofenceState())
+        return true
     }
 
-    private fun note(app: Context, reason: String) {
-        GeofenceLog.append(
-            app,
-            GeofenceEntry(System.currentTimeMillis(), GeofenceEntry.OUTCOME_HOLD, reason, false),
-        )
-    }
-}
-
-/**
- * Takes a fix, decides, and writes down what it decided.
- *
- * Runs once a minute after the car is switched off, because the dwell wants
- * a second opinion: the first reading clear of the anchor only starts a clock,
- * so a fix that wanders across the road and back never gets as far as a lock.
- */
-class GeofenceWorker(context: Context, params: WorkerParameters) :
-    CoroutineWorker(context, params) {
-
-    override suspend fun doWork(): Result {
+    /** One look. True when there is nothing left to watch for. */
+    private suspend fun look(): Boolean {
         val app = applicationContext
         val mode = KiaSettings.geofenceMode(app)
-        if (mode == GeofenceMode.OFF) return Result.success()
-        if (!Geofences.hasLocationPermission(app)) {
-            log(GeofenceEntry.OUTCOME_HOLD, "location permission not granted", acted = false)
-            return Result.success()
-        }
+        if (mode == GeofenceMode.OFF) return true
+        val anchor = GeofenceLog.anchor(app) ?: return true
 
-        // No disconnect to measure from. Nothing to do and nothing to say: the
-        // car has not been parked since this was switched on.
-        val anchor = GeofenceLog.anchor(app) ?: return Result.success()
-
-        val fix = currentFix(app)
         val now = System.currentTimeMillis()
         GeofenceLog.recordCheck(app, now)
 
+        if (Geofence.tooLate(anchor, now)) {
+            Geofences.note(
+                app,
+                "gave up: ${(now - anchor.atMillis) / 1000}s after parking, past the " +
+                    "${Geofence.LOCK_DEADLINE_MS / 1000}s limit",
+            )
+            GeofenceLog.clearAnchor(app)
+            return true
+        }
+
+        val fix = currentFix(app)
         val before = GeofenceLog.loadState(app)
         val outcome = Geofence.evaluate(
             anchor = anchor,
             fix = fix,
             state = before,
             radiusMetres = KiaSettings.geofenceRadius(app),
+            onHomeWifi = Geofences.onHomeWifi(app),
+            now = now,
         )
 
-        var done = false
-        when (val decision = outcome.decision) {
+        return when (val decision = outcome.decision) {
             is GeofenceDecision.Hold -> {
                 GeofenceLog.saveState(app, outcome.state)
                 log(GeofenceEntry.OUTCOME_HOLD, decision.reason, acted = false)
+                false
             }
 
             is GeofenceDecision.Waiting -> {
                 GeofenceLog.saveState(app, outcome.state)
                 log(GeofenceEntry.OUTCOME_WAITING, decision.reason, acted = false)
+                false
             }
 
             is GeofenceDecision.Lock -> {
@@ -262,7 +332,7 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
                 }
                 // A lock that did not go through has not settled anything:
                 // keep the dwell already served and try again next minute.
-                done = sent || !armed
+                val done = sent || !armed
                 GeofenceLog.saveState(app, if (done) outcome.state else before)
                 log(
                     GeofenceEntry.OUTCOME_LOCK,
@@ -278,33 +348,9 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
                     // The widget is still showing whatever the car was before.
                     KiaWorker.enqueue(app, KiaWorker.ACTION_STATUS)
                 }
+                done
             }
         }
-
-        if (!done) watchAgain(app, anchor.atMillis)
-        return Result.success()
-    }
-
-    /**
-     * Comes back in a minute, until the lock has gone out.
-     *
-     * Reconnecting to the car ends it too, through [Geofences.stop]. Otherwise
-     * a count bounds it, and running out says so in the log: a watch that ends
-     * without a lock is exactly the failure that otherwise leaves no trace.
-     */
-    private fun watchAgain(app: Context, anchorAt: Long) {
-        val spent = GeofenceLog.chases(app, anchorAt)
-        if (spent >= Geofences.WATCH_LIMIT) {
-            log(
-                GeofenceEntry.OUTCOME_HOLD,
-                "stopped watching after ${Geofences.WATCH_LIMIT} minutes without leaving the car",
-                acted = false,
-            )
-            return
-        }
-
-        GeofenceLog.recordChase(app, anchorAt, spent + 1)
-        Geofences.check(app, delaySeconds = Geofences.WATCH_INTERVAL_SECONDS)
     }
 
     private fun log(outcome: String, reason: String, acted: Boolean) {
@@ -312,6 +358,31 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
             applicationContext,
             GeofenceEntry(System.currentTimeMillis(), outcome, reason, acted),
         )
+    }
+
+    private fun channel(id: String, name: Int, importance: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getSystemService(NotificationManager::class.java)
+                ?.createNotificationChannel(NotificationChannel(id, getString(name), importance))
+        }
+    }
+
+    private fun openApp(): PendingIntent = PendingIntent.getActivity(
+        this,
+        0,
+        Intent(this, GeofenceActivity::class.java),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    /** Quiet and short-lived: there only while a parking is being watched. */
+    private fun watchingNotification(): Notification {
+        channel(WATCHING_CHANNEL, R.string.geofence_watching_channel, NotificationManager.IMPORTANCE_LOW)
+        return Notification.Builder(this, WATCHING_CHANNEL)
+            .setSmallIcon(CoreR.drawable.ic_lock)
+            .setContentTitle(getString(R.string.geofence_watching_title))
+            .setContentIntent(openApp())
+            .setOngoing(true)
+            .build()
     }
 
     /**
@@ -322,31 +393,14 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
      * go looking for.
      */
     private fun notifyLocked(distanceMetres: Int) {
-        val app = applicationContext
-        val manager = app.getSystemService(NotificationManager::class.java) ?: return
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        channel(CHANNEL, R.string.geofence_channel, NotificationManager.IMPORTANCE_DEFAULT)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL,
-                    app.getString(R.string.geofence_channel),
-                    NotificationManager.IMPORTANCE_DEFAULT,
-                )
-            )
-        }
-
-        val open = PendingIntent.getActivity(
-            app,
-            0,
-            Intent(app, GeofenceActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        val notification: Notification = Notification.Builder(app, CHANNEL)
+        val notification: Notification = Notification.Builder(this, CHANNEL)
             .setSmallIcon(CoreR.drawable.ic_lock)
-            .setContentTitle(app.getString(R.string.geofence_locked_title))
-            .setContentText(app.getString(R.string.geofence_locked_text, distanceMetres))
-            .setContentIntent(open)
+            .setContentTitle(getString(R.string.geofence_locked_title))
+            .setContentText(getString(R.string.geofence_locked_text, distanceMetres))
+            .setContentIntent(openApp())
             .setAutoCancel(true)
             .build()
 
@@ -356,6 +410,8 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
     private companion object {
         const val CHANNEL = "kia-geofence"
         const val NOTIFICATION_ID = 7301
+        const val WATCHING_CHANNEL = "kia-geofence-watching"
+        const val WATCHING_ID = 7302
     }
 }
 

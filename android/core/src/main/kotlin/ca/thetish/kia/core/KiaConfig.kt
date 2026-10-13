@@ -62,6 +62,7 @@ object KiaSettings {
     private const val KEY_GEOFENCE_RADIUS = "geofence_radius"
     private const val KEY_CAR_BLUETOOTH = "car_bluetooth"
     private const val KEY_CAR_BLUETOOTH_NAME = "car_bluetooth_name"
+    private const val KEY_HOME_WIFI = "home_wifi"
 
     /** Offered in the UI so switching hosts does not mean typing a URL. */
     val KNOWN_HOSTS = listOf(
@@ -197,6 +198,22 @@ object KiaSettings {
     fun isCarBluetooth(context: Context, address: String?): Boolean {
         val car = carBluetooth(context) ?: return false
         return address != null && address.equals(car, ignoreCase = true)
+    }
+
+    /**
+     * The home Wi-Fi's name. Joining it after the car goes quiet counts as
+     * having walked indoors, where the drive is too close for distance to tell.
+     */
+    fun homeWifi(context: Context): String? =
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString(KEY_HOME_WIFI, null)
+            ?.takeIf { it.isNotBlank() }
+
+    fun saveHomeWifi(context: Context, ssid: String?) {
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_HOME_WIFI, ssid)
+            .apply()
     }
 
     /** How far from the car counts as having left it. */

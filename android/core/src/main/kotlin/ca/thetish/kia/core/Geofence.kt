@@ -25,6 +25,12 @@ data class Anchor(
     val accuracyMetres: Float,
     /** Wall-clock millis of the disconnect. */
     val atMillis: Long,
+    /**
+     * Whether the phone was already on the home Wi-Fi when the car's Bluetooth
+     * dropped. If it was, the Wi-Fi reaches the car, and joining it later says
+     * nothing about having gone indoors.
+     */
+    val onHomeWifi: Boolean = false,
 )
 
 /** One position fix from the phone. */
@@ -160,6 +166,24 @@ object Geofence {
     const val MAX_PLAUSIBLE_METRES = 2_000
 
     /**
+     * The latest a lock may go out after the car's Bluetooth drops.
+     *
+     * Past this the moment has gone: Kia's own app has already told you the
+     * car is open, and a lock arriving later still - after Android has held the
+     * checks back for hours - reads as the car locking itself at random. Kia's
+     * "doors unlocked" alert came three minutes after parking on 2026-10-12;
+     * this stops fifteen seconds short of it. That leaves room for a walk of
+     * about a minute and a half before the minute-long confirm, which is an
+     * ordinary walk away. Lingering longer at the car means no auto-lock, and
+     * Kia's alert is there for that case.
+     */
+    const val LOCK_DEADLINE_MS = 165 * 1000L
+
+    /** Whether this parking is past [LOCK_DEADLINE_MS], so nothing more may be sent for it. */
+    fun tooLate(anchor: Anchor, now: Long, deadlineMs: Long = LOCK_DEADLINE_MS): Boolean =
+        now - anchor.atMillis > deadlineMs
+
+    /**
      * @param anchor where the car was when its Bluetooth dropped, or null if
      *   this phone has not seen a disconnect to measure from.
      */
@@ -169,10 +193,41 @@ object Geofence {
         state: GeofenceState,
         radiusMetres: Int = DEFAULT_RADIUS_METRES,
         dwellSeconds: Int = DEFAULT_DWELL_SECONDS,
+        onHomeWifi: Boolean = false,
+        now: Long = fix?.atMillis ?: 0L,
     ): GeofenceOutcome {
         // ── Is there a question to answer? ──
 
         if (anchor == null) return hold(state, "no disconnect to measure from")
+
+        // ── Home ──
+        //
+        // On the drive the phone indoors is fourteen metres from the car, closer
+        // than an indoor fix can resolve, so distance never decides there. The
+        // phone joining the home Wi-Fi after the car went quiet does: that
+        // happens when you walk in. It still has to hold for the dwell, so a
+        // brush past the front door does not count. If the Wi-Fi was already up
+        // in the car, it reaches the drive and proves nothing.
+        if (onHomeWifi && !anchor.onHomeWifi) {
+            if (state.actedOnAnchorAt == anchor.atMillis) {
+                return GeofenceOutcome(GeofenceDecision.Hold("already decided for this parking"), state)
+            }
+            val since = if (state.awaySince == 0L) now else state.awaySince
+            val onFor = now - since
+            val metres = fix?.let {
+                distanceMetres(anchor.latitude, anchor.longitude, it.latitude, it.longitude).toInt()
+            } ?: 0
+            if (onFor < dwellSeconds * 1000L) {
+                return GeofenceOutcome(
+                    GeofenceDecision.Waiting("on the home Wi-Fi, ${onFor / 1000}s of ${dwellSeconds}s"),
+                    state.copy(awaySince = since),
+                )
+            }
+            return GeofenceOutcome(
+                GeofenceDecision.Lock(reason = "on the home Wi-Fi for ${onFor / 1000}s", distanceMetres = metres),
+                GeofenceState(awaySince = 0L, actedOnAnchorAt = anchor.atMillis),
+            )
+        }
 
         if (fix == null) return hold(state, "no position fix")
         if (fix.accuracyMetres > MAX_ACCURACY_METRES) {
