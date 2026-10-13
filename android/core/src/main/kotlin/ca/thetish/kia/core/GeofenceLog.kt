@@ -44,6 +44,7 @@ object GeofenceLog {
     private const val KEY_ANCHOR_LON = "anchor_lon"
     private const val KEY_ANCHOR_ACCURACY = "anchor_accuracy"
     private const val KEY_ANCHOR_AT = "anchor_at"
+    private const val KEY_ANCHOR_WIFI = "anchor_home_wifi"
 
     private const val FILE = "kia_geofence_log"
     private const val KEY = "entries"
@@ -64,6 +65,7 @@ object GeofenceLog {
             longitude = Double.fromBits(prefs.getLong(KEY_ANCHOR_LON, 0L)),
             accuracyMetres = prefs.getFloat(KEY_ANCHOR_ACCURACY, 0f),
             atMillis = at,
+            onHomeWifi = prefs.getBoolean(KEY_ANCHOR_WIFI, false),
         )
     }
 
@@ -76,6 +78,7 @@ object GeofenceLog {
             .putLong(KEY_ANCHOR_LON, anchor.longitude.toRawBits())
             .putFloat(KEY_ANCHOR_ACCURACY, anchor.accuracyMetres)
             .putLong(KEY_ANCHOR_AT, anchor.atMillis)
+            .putBoolean(KEY_ANCHOR_WIFI, anchor.onHomeWifi)
             .apply()
     }
 
@@ -86,6 +89,7 @@ object GeofenceLog {
             .remove(KEY_ANCHOR_LON)
             .remove(KEY_ANCHOR_ACCURACY)
             .remove(KEY_ANCHOR_AT)
+            .remove(KEY_ANCHOR_WIFI)
             .apply()
     }
 

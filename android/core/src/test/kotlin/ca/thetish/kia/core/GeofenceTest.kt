@@ -307,4 +307,41 @@ class GeofenceTest {
         assertTrue(Geofence.tooLate(parked, now + Geofence.LOCK_DEADLINE_MS + 1))
         assertTrue(Geofence.tooLate(parked, now + 3 * 60 * 60 * 1000L))
     }
+
+    // ── home Wi-Fi ──
+
+    @Test
+    fun `joining the home Wi-Fi after parking locks once it holds`() {
+        // Indoors, 14m from the car on a fix good to 10m: distance alone holds.
+        val parked = anchor(at = now)
+        val indoors = fixAt(14.0, accuracy = 10f, at = now + 60_000L)
+        assertTrue(Geofence.evaluate(parked, indoors, GeofenceState()).decision is GeofenceDecision.Hold)
+
+        var out = Geofence.evaluate(parked, indoors, GeofenceState(), onHomeWifi = true)
+        assertTrue(out.decision is GeofenceDecision.Waiting)
+
+        val later = fixAt(14.0, accuracy = 10f, at = now + 120_000L)
+        out = Geofence.evaluate(parked, later, out.state, onHomeWifi = true)
+        assertTrue(out.decision is GeofenceDecision.Lock)
+    }
+
+    @Test
+    fun `home Wi-Fi that already reached the car proves nothing`() {
+        val parked = Anchor(carLat, carLon, 5f, now, onHomeWifi = true)
+        var state = GeofenceState()
+        repeat(3) { i ->
+            val out = Geofence.evaluate(parked, fixAt(3.0, at = now + i * 60_000L), state, onHomeWifi = true)
+            assertTrue(out.decision is GeofenceDecision.Hold)
+            state = out.state
+        }
+    }
+
+    @Test
+    fun `home Wi-Fi works with no usable fix indoors`() {
+        val parked = anchor(at = now)
+        var out = Geofence.evaluate(parked, null, GeofenceState(), onHomeWifi = true, now = now + 60_000L)
+        assertTrue(out.decision is GeofenceDecision.Waiting)
+        out = Geofence.evaluate(parked, null, out.state, onHomeWifi = true, now = now + 120_000L)
+        assertTrue(out.decision is GeofenceDecision.Lock)
+    }
 }
