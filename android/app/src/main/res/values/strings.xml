@@ -191,6 +191,15 @@
     <string name="geofence_entry_sent">Lock sent to the car</string>
     <string name="geofence_locked_title">EV6 locked</string>
     <string name="geofence_locked_text">Locked automatically — you were %1$d m away</string>
+    <string name="geofence_locked_home_text">Locked automatically — parked at home for 5 minutes</string>
+    <string name="geofence_home">Home</string>
+    <string name="geofence_home_none">Not set — the car is never locked from indoors</string>
+    <string name="geofence_home_set">Set — locks 5 minutes after parking there</string>
+    <string name="geofence_home_use">Use where the car is parked now</string>
+    <string name="geofence_home_clear">Clear home</string>
+    <string name="geofence_home_explain">At home the phone indoors is too close to the car to tell it from the driver\'s seat, so there the car is locked 5 minutes after it is switched off instead, however close you are.</string>
+    <string name="geofence_home_no_parking">Park at home first: home is taken from where the car was when its Bluetooth last dropped.</string>
+    <string name="geofence_needs_unrestricted">Battery is not set to Unrestricted, so Android holds the minute-by-minute check while the screen is off and locks can arrive many minutes late. Tap here, then Battery → Unrestricted.</string>
     <string name="label_geofence">Auto-lock</string>
     <string name="geofence_summary_off">Off</string>
     <string name="geofence_summary_shadow">Shadow — deciding, not acting</string>

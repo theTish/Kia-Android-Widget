@@ -62,6 +62,8 @@ object KiaSettings {
     private const val KEY_GEOFENCE_RADIUS = "geofence_radius"
     private const val KEY_CAR_BLUETOOTH = "car_bluetooth"
     private const val KEY_CAR_BLUETOOTH_NAME = "car_bluetooth_name"
+    private const val KEY_HOME_LAT = "home_lat"
+    private const val KEY_HOME_LON = "home_lon"
 
     /** Offered in the UI so switching hosts does not mean typing a URL. */
     val KNOWN_HOSTS = listOf(
@@ -197,6 +199,32 @@ object KiaSettings {
     fun isCarBluetooth(context: Context, address: String?): Boolean {
         val car = carBluetooth(context) ?: return false
         return address != null && address.equals(car, ignoreCase = true)
+    }
+
+    /**
+     * Where the car lives, or null if it has not been set.
+     *
+     * Raw bits for the same reason as the anchor: a float rounds a latitude to
+     * about a metre and a half.
+     */
+    fun home(context: Context): Home? {
+        val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        if (!prefs.contains(KEY_HOME_LAT)) return null
+        return Home(
+            Double.fromBits(prefs.getLong(KEY_HOME_LAT, 0L)),
+            Double.fromBits(prefs.getLong(KEY_HOME_LON, 0L)),
+        )
+    }
+
+    fun saveHome(context: Context, home: Home?) {
+        val edit = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+        if (home == null) {
+            edit.remove(KEY_HOME_LAT).remove(KEY_HOME_LON)
+        } else {
+            edit.putLong(KEY_HOME_LAT, home.latitude.toRawBits())
+                .putLong(KEY_HOME_LON, home.longitude.toRawBits())
+        }
+        edit.apply()
     }
 
     /** How far from the car counts as having left it. */

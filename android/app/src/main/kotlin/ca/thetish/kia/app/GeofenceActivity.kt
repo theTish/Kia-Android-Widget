@@ -17,6 +17,7 @@ import android.widget.TextView
 import ca.thetish.kia.core.GeofenceEntry
 import ca.thetish.kia.core.GeofenceLog
 import ca.thetish.kia.core.GeofenceMode
+import ca.thetish.kia.core.Home
 import ca.thetish.kia.core.KiaSettings
 import ca.thetish.kia.core.R as CoreR
 import java.text.DateFormat
@@ -37,6 +38,7 @@ class GeofenceActivity : Activity() {
     private lateinit var warning: TextView
     private lateinit var radiusValue: TextView
     private lateinit var carDevice: TextView
+    private lateinit var homeValue: TextView
     private lateinit var logContainer: LinearLayout
     private lateinit var empty: TextView
 
@@ -63,6 +65,8 @@ class GeofenceActivity : Activity() {
         radiusValue = findViewById(R.id.radius_value)
         carDevice = findViewById(R.id.car_device_value)
         findViewById<View>(R.id.car_device).setOnClickListener { chooseCarDevice() }
+        homeValue = findViewById(R.id.home_value)
+        findViewById<View>(R.id.home).setOnClickListener { chooseHome() }
         logContainer = findViewById(R.id.log)
         empty = findViewById(R.id.empty)
 
@@ -203,6 +207,39 @@ class GeofenceActivity : Activity() {
             .show()
     }
 
+    /**
+     * Takes home from the last parking rather than a map pin: the anchor is
+     * the phone's own fix from inside the car, so it is the same measurement
+     * every later parking at home will be compared against.
+     */
+    private fun chooseHome() {
+        val anchor = GeofenceLog.anchor(this)
+        val builder = AlertDialog.Builder(this)
+            .setTitle(R.string.geofence_home)
+            .setMessage(
+                if (anchor == null) {
+                    getString(R.string.geofence_home_no_parking)
+                } else {
+                    getString(R.string.geofence_home_explain)
+                }
+            )
+            .setNegativeButton(android.R.string.cancel, null)
+
+        if (anchor != null) {
+            builder.setPositiveButton(R.string.geofence_home_use) { _, _ ->
+                KiaSettings.saveHome(this, Home(anchor.latitude, anchor.longitude))
+                render()
+            }
+        }
+        if (KiaSettings.home(this) != null) {
+            builder.setNeutralButton(R.string.geofence_home_clear) { _, _ ->
+                KiaSettings.saveHome(this, null)
+                render()
+            }
+        }
+        builder.show()
+    }
+
     // ── rendering ──
 
     private fun render() {
@@ -245,6 +282,10 @@ class GeofenceActivity : Activity() {
             ?: KiaSettings.carBluetooth(this)
             ?: getString(R.string.geofence_car_device_none)
 
+        homeValue.setText(
+            if (KiaSettings.home(this) == null) R.string.geofence_home_none else R.string.geofence_home_set
+        )
+
         renderWarning(mode)
         renderLog()
     }
@@ -259,13 +300,14 @@ class GeofenceActivity : Activity() {
             !Geofences.hasLocationPermission(this) -> getString(R.string.geofence_needs_location)
             !Geofences.hasBackgroundLocationPermission(this) ->
                 getString(R.string.geofence_needs_background)
+            !Geofences.isUnrestricted(this) -> getString(R.string.geofence_needs_unrestricted)
 
             else -> null
         }
         warning.text = message.orEmpty()
         warning.visibility = if (message == null) View.GONE else View.VISIBLE
 
-        // Only the background-location case has somewhere useful to go.
+        // The background-location and battery cases both end on this app's page.
         val opensSettings = message != null && Geofences.hasLocationPermission(this)
         warning.isClickable = opensSettings
         warning.setOnClickListener(if (opensSettings) View.OnClickListener { openAppSettings() } else null)

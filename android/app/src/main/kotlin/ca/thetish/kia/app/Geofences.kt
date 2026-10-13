@@ -13,6 +13,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Build
+import android.os.PowerManager
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
@@ -122,6 +123,17 @@ object Geofences {
                 context,
                 Manifest.permission.ACCESS_BACKGROUND_LOCATION,
             ) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Whether Android lets the minute-by-minute watch run with the screen off.
+     *
+     * Without it the next check waits for the screen to come on or for one of
+     * Doze's maintenance windows: on 2026-10-12 locks landed 10 to 45 minutes
+     * after the walk-away, each within seconds of the phone being picked up.
+     */
+    fun isUnrestricted(context: Context): Boolean =
+        context.getSystemService(PowerManager::class.java)
+            ?.isIgnoringBatteryOptimizations(context.packageName) == true
 
     /** Reading which device disconnected needs this from Android 12. */
     fun hasBluetoothPermission(context: Context): Boolean =
@@ -235,10 +247,12 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
 
         val before = GeofenceLog.loadState(app)
         val outcome = Geofence.evaluate(
+            now = now,
             anchor = anchor,
             fix = fix,
             state = before,
             radiusMetres = KiaSettings.geofenceRadius(app),
+            home = KiaSettings.home(app),
         )
 
         var done = false
@@ -274,7 +288,7 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
                     acted = sent,
                 )
                 if (sent) {
-                    notifyLocked(decision.distanceMetres)
+                    notifyLocked(decision)
                     // The widget is still showing whatever the car was before.
                     KiaWorker.enqueue(app, KiaWorker.ACTION_STATUS)
                 }
@@ -321,7 +335,7 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
      * trace a person will actually see, rather than one in a log they have to
      * go looking for.
      */
-    private fun notifyLocked(distanceMetres: Int) {
+    private fun notifyLocked(decision: GeofenceDecision.Lock) {
         val app = applicationContext
         val manager = app.getSystemService(NotificationManager::class.java) ?: return
 
@@ -345,7 +359,13 @@ class GeofenceWorker(context: Context, params: WorkerParameters) :
         val notification: Notification = Notification.Builder(app, CHANNEL)
             .setSmallIcon(CoreR.drawable.ic_lock)
             .setContentTitle(app.getString(R.string.geofence_locked_title))
-            .setContentText(app.getString(R.string.geofence_locked_text, distanceMetres))
+            .setContentText(
+                if (decision.atHome) {
+                    app.getString(R.string.geofence_locked_home_text)
+                } else {
+                    app.getString(R.string.geofence_locked_text, decision.distanceMetres)
+                }
+            )
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()

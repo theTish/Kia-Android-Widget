@@ -27,6 +27,16 @@ data class Anchor(
     val atMillis: Long,
 )
 
+/**
+ * Where the car lives: the drive at home.
+ *
+ * The one place the ring cannot work. Indoors the phone sits a dozen metres
+ * from the car on a fix good to about ten, so it can never be sure it has left
+ * - on 2026-10-11 and -12 it watched for an hour from the house, logged
+ * "inside the ring" throughout, and left the car open overnight.
+ */
+data class Home(val latitude: Double, val longitude: Double)
+
 /** One position fix from the phone. */
 data class PhoneFix(
     val latitude: Double,
@@ -63,8 +73,12 @@ sealed interface GeofenceDecision {
     /** Away from the car, but not for long enough yet. */
     data class Waiting(override val reason: String) : GeofenceDecision
 
-    /** Walked away from the car. */
-    data class Lock(override val reason: String, val distanceMetres: Int) : GeofenceDecision
+    /** Walked away from the car, or left it parked at home. */
+    data class Lock(
+        override val reason: String,
+        val distanceMetres: Int,
+        val atHome: Boolean = false,
+    ) : GeofenceDecision
 }
 
 /**
@@ -159,20 +173,62 @@ object Geofence {
      */
     const val MAX_PLAUSIBLE_METRES = 2_000
 
+    /** How near [Home] a parking has to be to count as parked at home. */
+    const val HOME_MATCH_METRES = 50
+
+    /**
+     * How long the car sits at home, switched off and not reconnected, before
+     * it is locked however close the phone is.
+     *
+     * Five minutes covers unloading and a call in the driver's seat. Being in
+     * the car when it locks is harmless; the case this accepts is the phone and
+     * the keys both left inside, which the Kia app on another device undoes.
+     */
+    const val HOME_DELAY_MS = 5 * 60 * 1000L
+
     /**
      * @param anchor where the car was when its Bluetooth dropped, or null if
      *   this phone has not seen a disconnect to measure from.
+     * @param home where the car lives, if one has been set; see [HOME_DELAY_MS].
      */
     fun evaluate(
+        now: Long,
         anchor: Anchor?,
         fix: PhoneFix?,
         state: GeofenceState,
         radiusMetres: Int = DEFAULT_RADIUS_METRES,
         dwellSeconds: Int = DEFAULT_DWELL_SECONDS,
+        home: Home? = null,
     ): GeofenceOutcome {
         // ── Is there a question to answer? ──
 
         if (anchor == null) return hold(state, "no disconnect to measure from")
+
+        // ── Parked at home ──
+        //
+        // Asked before the fix, because the fix is what cannot answer it: the
+        // phone indoors is as close to the car as the phone in the driver's
+        // seat. Time stands in for distance instead.
+        val parkedFor = now - anchor.atMillis
+        if (
+            home != null &&
+            parkedFor >= HOME_DELAY_MS &&
+            state.actedOnAnchorAt != anchor.atMillis &&
+            distanceMetres(anchor.latitude, anchor.longitude, home.latitude, home.longitude) <=
+            HOME_MATCH_METRES
+        ) {
+            val metres = fix?.let {
+                distanceMetres(anchor.latitude, anchor.longitude, it.latitude, it.longitude).toInt()
+            } ?: 0
+            return GeofenceOutcome(
+                GeofenceDecision.Lock(
+                    reason = "parked at home for ${parkedFor / 60_000}m",
+                    distanceMetres = metres,
+                    atHome = true,
+                ),
+                GeofenceState(awaySince = 0L, actedOnAnchorAt = anchor.atMillis),
+            )
+        }
 
         if (fix == null) return hold(state, "no position fix")
         if (fix.accuracyMetres > MAX_ACCURACY_METRES) {
