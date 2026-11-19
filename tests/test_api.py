@@ -190,6 +190,28 @@ check("/status works after OTP", client.post("/status", headers=H).status_code =
 r = client.post("/otp/verify", json={"otp":"abc"}, headers=H)
 check("non-numeric OTP 400", r.status_code == 400)
 
+print("\n--- OTP send always gets a fresh challenge ---")
+fake = reset(otp=True)
+client.post("/status", headers=H)
+stale = fake.otp_request
+logins = fake.logins
+r = client.post("/otp/send", json={"method":"email"}, headers=H)
+check("/otp/send 200 with a challenge already held", r.status_code == 200, r.get_data(as_text=True)[:300])
+check("send logged in again", fake.logins == logins + 1, (logins, fake.logins))
+check("held challenge replaced", fake.otp_request is not stale)
+check("OTP endpoints need the key",
+      client.post("/otp/send", json={"method":"email"}).status_code == 403
+      and client.post("/otp/verify", json={"otp":"123456"}).status_code == 403)
+check("anonymous send did not log in", fake.logins == logins + 1, fake.logins)
+
+print("\n--- OTP send on a trusted device ---")
+fake = reset()
+r = client.post("/otp/send", json={"method":"email"}, headers=H)
+check("trusted: authenticated, nothing sent",
+      r.status_code == 200 and r.get_json().get("status") == "authenticated"
+      and not any(c[0] == "send_otp" for c in fake.calls), r.get_data(as_text=True)[:300])
+check("trusted: /status works", client.post("/status", headers=H).status_code == 200)
+
 print("\n--- charge limits validation ---")
 fake = reset()
 client.post("/status", headers=H)

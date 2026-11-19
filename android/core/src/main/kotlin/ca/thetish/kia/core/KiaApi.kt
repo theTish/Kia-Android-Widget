@@ -5,14 +5,24 @@ import java.io.BufferedReader
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Outcome of one command, already reduced to something short enough for a watch face. */
-data class ApiResult(val ok: Boolean, val message: String)
+/**
+ * Outcome of one command, already reduced to something short enough for a watch face.
+ *
+ * [otpRequired] means Kia stopped trusting the server (it asks every 90 days)
+ * and nothing will work until the owner enters the code Kia emails them.
+ */
+data class ApiResult(val ok: Boolean, val message: String, val otpRequired: Boolean = false)
 
 /** A status read: the parsed state, or why it could not be read. */
-data class StatusResult(val ok: Boolean, val message: String, val status: VehicleStatus?)
+data class StatusResult(
+    val ok: Boolean,
+    val message: String,
+    val status: VehicleStatus?,
+    val otpRequired: Boolean = false,
+)
 
 /**
- * Talks to the Flask API on Vercel.
+ * Talks to the Flask API (the Oracle box, Vercel as standby).
  *
  * Deliberately uses HttpURLConnection rather than pulling in OkHttp: the whole
  * app makes four kinds of request and a smaller APK sideloads faster.
@@ -86,6 +96,7 @@ object KiaApi {
         val (code, text, error) = request(cfg, "/status", body)
 
         if (error != null) return StatusResult(false, error, null)
+        if (isOtpWall(code, text)) return StatusResult(false, OTP_MESSAGE, null, otpRequired = true)
         if (!code.isOk) return StatusResult(false, field(text, "error") ?: "HTTP $code", null)
 
         return try {
@@ -99,6 +110,7 @@ object KiaApi {
         val (code, text, error) = request(cfg, path, body)
 
         if (error != null) return ApiResult(false, error)
+        if (isOtpWall(code, text)) return ApiResult(false, OTP_MESSAGE, otpRequired = true)
 
         return if (code.isOk) {
             ApiResult(true, field(text, "status") ?: "Done")
@@ -107,6 +119,35 @@ object KiaApi {
             ApiResult(false, field(text, "error") ?: "HTTP $code")
         }
     }
+
+    // ── Kia's 90-day device check ───────────────────────────────────────────
+
+    /**
+     * Asks the server to have Kia email the owner a code.
+     *
+     * The server logs in afresh for this, so it costs one Kia login: call it
+     * once per tap, never in a retry loop. "authenticated" back means Kia
+     * trusts the server after all and there is nothing to enter.
+     */
+    fun otpSend(cfg: KiaConfig): OtpSendResult {
+        val (code, text, error) = request(cfg, "/otp/send", JSONObject().put("method", "email").toString())
+        if (error != null) return OtpSendResult.Failed(error)
+        if (!code.isOk) return OtpSendResult.Failed(field(text, "error") ?: "HTTP $code")
+        return if (field(text, "status") == "authenticated") OtpSendResult.AlreadyTrusted else OtpSendResult.Sent
+    }
+
+    /** Hands the emailed code to the server, which finishes the Kia login with it. */
+    fun otpVerify(cfg: KiaConfig, otp: String): ApiResult {
+        val (code, text, error) = request(cfg, "/otp/verify", JSONObject().put("otp", otp).toString())
+        if (error != null) return ApiResult(false, error)
+        return if (code.isOk) ApiResult(true, "Verified") else ApiResult(false, field(text, "error") ?: "HTTP $code")
+    }
+
+    /** The server's answer to any car call while Kia is waiting on a code. */
+    private fun isOtpWall(code: Int, text: String): Boolean =
+        code == 401 && runCatching { JSONObject(text).optBoolean("otp_required") }.getOrDefault(false)
+
+    const val OTP_MESSAGE = "Kia needs a code"
 
     /** One POST. Returns status code and body, or a human-readable failure. */
     private fun request(cfg: KiaConfig, path: String, body: String?): Triple<Int, String, String?> {
@@ -148,4 +189,10 @@ object KiaApi {
 
     private fun JSONObject.stringOrNull(key: String): String? =
         if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
+}
+
+sealed interface OtpSendResult {
+    data object Sent : OtpSendResult
+    data object AlreadyTrusted : OtpSendResult
+    data class Failed(val message: String) : OtpSendResult
 }

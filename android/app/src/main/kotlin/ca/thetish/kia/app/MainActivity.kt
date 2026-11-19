@@ -14,6 +14,8 @@ import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.view.View
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -25,6 +27,7 @@ import ca.thetish.kia.core.ClimateSettings
 import ca.thetish.kia.core.ClimateSync
 import ca.thetish.kia.core.KiaApi
 import ca.thetish.kia.core.KiaSettings
+import ca.thetish.kia.core.OtpSendResult
 import ca.thetish.kia.core.UnlockGuard
 import ca.thetish.kia.core.VehicleStatus
 import ca.thetish.kia.core.R as CoreR
@@ -78,6 +81,9 @@ class MainActivity : Activity() {
     private lateinit var mapButton: LinearLayout
 
     private var latest: VehicleStatus? = null
+
+    /** The open "Kia needs a code" dialog, so a second wall hit does not stack another. */
+    private var otpDialog: Dialog? = null
 
     /** See UnlockGuard: first tap arms, second tap sends. */
     private var unlockArmedUntil = 0L
@@ -150,7 +156,19 @@ class MainActivity : Activity() {
         }
         setButtonsEnabled(true)
         renderClimate(latest)
+
+        // Opened from the "Kia needs a code" notification: go straight to it
+        // rather than waiting for the status read to hit the wall.
+        if (intent.getBooleanExtra(KiaOtp.EXTRA_OPEN, false)) {
+            intent.removeExtra(KiaOtp.EXTRA_OPEN)
+            showOtp()
+        }
         refresh()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
     }
 
     // ── unlock ───────────────────────────────────────────────────────────────
@@ -210,6 +228,7 @@ class MainActivity : Activity() {
                     status.text = getString(R.string.updated_at, shortTime(s.lastUpdated))
                 } else {
                     status.text = getString(R.string.test_failed, outcome.message)
+                    if (outcome.otpRequired) showOtp()
                 }
             }
         }
@@ -233,6 +252,7 @@ class MainActivity : Activity() {
                 status.text = result.message
                 setButtonsEnabled(true)
                 if (result.ok) onSuccess()
+                if (result.otpRequired) showOtp()
             }
         }
     }
@@ -550,6 +570,93 @@ class MainActivity : Activity() {
     }
 
     /**
+     * Kia's 90-day device check, end to end.
+     *
+     * One button, two steps: first it has Kia email a code, then the same
+     * button sends the code back. Sending costs the server a real Kia login, so
+     * it happens only on a tap and never repeats on its own.
+     */
+    private fun showOtp() {
+        if (otpDialog?.isShowing == true || isFinishing) return
+
+        val view = layoutInflater.inflate(R.layout.dialog_otp, null)
+        val body = view.findViewById<TextView>(R.id.otp_body)
+        val code = view.findViewById<EditText>(R.id.otp_code)
+        val message = view.findViewById<TextView>(R.id.otp_message)
+        val action = view.findViewById<TextView>(R.id.otp_action)
+        var sent = false
+
+        val dialog = Dialog(this)
+        dialog.setContentView(view)
+        dialog.window?.apply {
+            setBackgroundDrawableResource(android.R.color.transparent)
+            setLayout(
+                (resources.displayMetrics.widthPixels * 0.9f).toInt(),
+                WindowManager.LayoutParams.WRAP_CONTENT,
+            )
+            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+
+        fun busy(on: Boolean) {
+            action.isEnabled = !on
+            action.alpha = if (on) 0.5f else 1f
+        }
+
+        fun close(textRes: Int) {
+            KiaOtp.clear(this)
+            dialog.dismiss()
+            status.text = getString(textRes)
+            refresh()
+        }
+
+        action.setOnClickListener {
+            if (!sent) {
+                busy(true)
+                message.setText(R.string.otp_sending)
+                io.execute {
+                    val result = KiaApi.otpSend(KiaSettings.load(this))
+                    main.post {
+                        if (isDestroyed) return@post
+                        busy(false)
+                        when (result) {
+                            OtpSendResult.Sent -> {
+                                sent = true
+                                body.setText(R.string.otp_body_sent)
+                                message.text = ""
+                                action.setText(R.string.otp_verify)
+                                code.visibility = View.VISIBLE
+                                code.requestFocus()
+                                getSystemService(InputMethodManager::class.java)
+                                    ?.showSoftInput(code, InputMethodManager.SHOW_IMPLICIT)
+                            }
+                            OtpSendResult.AlreadyTrusted -> close(R.string.otp_trusted)
+                            is OtpSendResult.Failed -> message.text = result.message
+                        }
+                    }
+                }
+            } else {
+                val otp = code.text.toString().trim()
+                if (otp.isEmpty()) return@setOnClickListener
+                busy(true)
+                message.setText(R.string.otp_verifying)
+                io.execute {
+                    val result = KiaApi.otpVerify(KiaSettings.load(this), otp)
+                    main.post {
+                        if (isDestroyed) return@post
+                        busy(false)
+                        if (result.ok) close(R.string.otp_done) else message.text = result.message
+                    }
+                }
+            }
+        }
+        view.findViewById<View>(R.id.otp_cancel).setOnClickListener { dialog.dismiss() }
+        dialog.setOnDismissListener { otpDialog = null }
+
+        otpDialog = dialog
+        dialog.show()
+    }
+
+    /**
      * The schedule behind the row, read-only.
      *
      * A dialog rather than a screen: it is two timers and a switch, and the
@@ -695,6 +802,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        otpDialog?.dismiss()
         // shutdownNow interrupts a request still in flight; plain shutdown would
         // let it hold this Activity and its view tree for the full 45s timeout.
         io.shutdownNow()
