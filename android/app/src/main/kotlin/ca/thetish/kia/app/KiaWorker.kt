@@ -60,6 +60,7 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
             prefs[Keys.busy] = false
             prefs[Keys.message] = result.message
         }
+        KiaOtp.noticeIf(applicationContext, result.otpRequired)
 
         // A lock or unlock changes what the status line should say, so re-read it.
         if (result.ok) refresh(announce = false)
@@ -93,6 +94,7 @@ class KiaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(co
     private suspend fun refresh(announce: Boolean) {
         val result = withContext(Dispatchers.IO) { KiaApi.status(KiaSettings.load(applicationContext)) }
         val status = result.status
+        KiaOtp.noticeIf(applicationContext, result.otpRequired)
 
 
         setState { prefs ->

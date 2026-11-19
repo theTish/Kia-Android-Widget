@@ -613,6 +613,34 @@ def json_errors(f):
     return wrapped
 
 
+def _key_or_rate_refusal():
+    """The response that refuses this request, or None when it may go on."""
+    auth_header = request.headers.get("Authorization")
+    if auth_header != SECRET_KEY:
+        logger.warning(f"Unauthorized request to {request.path} from {request.remote_addr}")
+        return jsonify({"error": "Unauthorized"}), 403
+
+    client_id = request.remote_addr
+    if not check_rate_limit(client_id):
+        logger.warning(f"Rate limit exceeded for {client_id}")
+        return jsonify({"error": "Rate limit exceeded. Please try again later."}), 429
+
+    return None
+
+
+def require_key(f):
+    """The app's key and the rate limit, without needing a logged-in car.
+
+    For the OTP endpoints: they run while the car is unreachable by design, but
+    /otp/send performs a real Kia login, so an anonymous caller must not be able
+    to spend one - every attempt feeds the 7901 lockout.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        return _key_or_rate_refusal() or f(*args, **kwargs)
+    return decorated
+
+
 def require_auth(f):
     """Decorator to require authorization header and verified OTP."""
     @wraps(f)
@@ -621,15 +649,9 @@ def require_auth(f):
         # initialising performs a real login against Kia. Doing it the other way
         # let any unauthenticated request burn a login - and repeated ones feed
         # the 7901 lockout the cooldown below exists to avoid.
-        auth_header = request.headers.get("Authorization")
-        if auth_header != SECRET_KEY:
-            logger.warning(f"Unauthorized request to {request.path} from {request.remote_addr}")
-            return jsonify({"error": "Unauthorized"}), 403
-
-        client_id = request.remote_addr
-        if not check_rate_limit(client_id):
-            logger.warning(f"Rate limit exceeded for {client_id}")
-            return jsonify({"error": "Rate limit exceeded. Please try again later."}), 429
+        refused = _key_or_rate_refusal()
+        if refused:
+            return refused
 
         if not init_vehicle_manager():
             return jsonify({"error": "Service initialization failed"}), 503
@@ -734,92 +756,103 @@ def diagnostics():
 
 # ── OTP Endpoints (for 2FA authentication) ──
 @app.route('/otp/send', methods=['POST'])
+@require_key
 def send_otp():
     """
     Request an OTP be sent to the account owner.
 
     Body: {"method": "email"}
     Canada only supports email; SMS is accepted for other regions.
+
+    Always logs in afresh to get the challenge rather than reusing one already
+    held. A held challenge is whatever the last login left behind - a token
+    refresh that found the 90-day trust lapsed can leave one there for hours -
+    and Kia answers a send against a stale one with its generic "could not be
+    processed". On 2026-11-19 that needed a container restart to clear.
     """
+    global vehicle_manager
+    from hyundai_kia_connect_api.ApiImpl import OTPRequest
     from hyundai_kia_connect_api.const import OTP_NOTIFY_TYPE
 
-    data = request.get_json() or {}
-    method = data.get("method", "email").lower()
+    data = request.get_json(silent=True) or {}
+    method = str(data.get("method", "email")).lower()
 
     if method not in ["sms", "email"]:
         return jsonify({"error": "Method must be 'sms' or 'email'"}), 400
 
-    wait_minutes = _cooldown_remaining()
-    if wait_minutes:
-        return jsonify({
-            "error": f"Login cooldown active. Wait {wait_minutes} more minute(s) before retrying.",
-            "retry_after_minutes": wait_minutes,
-        }), 429
+    already_trusted = {
+        "status": "authenticated",
+        "message": "Device is already trusted - no OTP needed. API is ready to use.",
+    }
 
-    # init_vehicle_manager performs the login that produces the OTPRequest.
-    if not init_vehicle_manager():
-        return jsonify({"error": "Failed to initialize vehicle manager"}), 503
+    with _init_lock:
+        wait_minutes = _cooldown_remaining()
+        if wait_minutes:
+            return jsonify({
+                "error": f"Login cooldown active. Wait {wait_minutes} more minute(s) before retrying.",
+                "retry_after_minutes": wait_minutes,
+            }), 429
 
-    if otp_state.get("verified") and not otp_state.get("required"):
-        return jsonify({
-            "status": "authenticated",
-            "message": "Device is already trusted - no OTP needed. API is ready to use.",
-        }), 200
+        if VEHICLE_ID is not None and otp_state.get("verified") and not otp_state.get("required"):
+            return jsonify(already_trusted), 200
 
-    # The library owns the challenge (vehicle_manager.otp_request); we do not
-    # keep a copy. A lapse detected during a token refresh raises without
-    # setting one, so log in again here to produce it.
-    if getattr(vehicle_manager, "otp_request", None) is None:
         try:
-            logger.info("No OTP challenge held; logging in to request one...")
-            vehicle_manager.login()
+            logger.info("Logging in to get a fresh OTP challenge...")
+            vm = _build_vehicle_manager()
+            result = vm.login()
         except Exception as e:
             logger.error(f"Login while requesting an OTP challenge failed: {e}", exc_info=True)
             otp_state["error"] = str(e)
             _start_cooldown("Login while requesting an OTP challenge failed.")
             return jsonify({"error": str(e), "type": type(e).__name__}), 503
 
-        if getattr(vehicle_manager, "otp_request", None) is None:
-            # login() returned a Token, so the device is trusted after all.
-            if _complete_login(vehicle_manager):
-                return jsonify({
-                    "status": "authenticated",
-                    "message": "Device is already trusted - no OTP needed. API is ready to use.",
-                }), 200
-            return jsonify({
-                "error": "No OTP challenge available. Login did not request one.",
-                "detail": otp_state.get("error"),
-            }), 503
+        if result is True:
+            # The device is trusted after all; nothing to send.
+            vehicle_manager = vm
+            vehicle_state_cache["last_update"] = None
+            if _complete_login(vm):
+                return jsonify(already_trusted), 200
+            return jsonify({"error": "Logged in, but no vehicles found on the account"}), 502
 
-    try:
-        logger.info(f"Requesting OTP via {method}...")
-        notify_type = OTP_NOTIFY_TYPE.EMAIL if method == "email" else OTP_NOTIFY_TYPE.SMS
-        vehicle_manager.send_otp(notify_type)
+        if not isinstance(result, OTPRequest):
+            logger.error(f"Unexpected login result: {result!r}")
+            _start_cooldown("Login returned an unexpected result.")
+            return jsonify({"error": f"Unexpected login result: {result!r}"}), 503
+
+        # /otp/verify reads the challenge off the live manager, so this one
+        # becomes it. The old one's token is dead either way.
+        vehicle_manager = vm
+        otp_state.update({"required": True, "verified": False, "sent": False})
+
+        try:
+            logger.info(f"Requesting OTP via {method}...")
+            notify_type = OTP_NOTIFY_TYPE.EMAIL if method == "email" else OTP_NOTIFY_TYPE.SMS
+            vm.send_otp(notify_type)
+        except Exception as e:
+            logger.error(f"Failed to send OTP: {e}", exc_info=True)
+            otp_state["error"] = str(e)
+            return jsonify({"error": str(e), "type": type(e).__name__}), 500
 
         otp_state["sent"] = True
-        otp_state["required"] = True
         otp_state["error"] = None
 
-        return jsonify({
-            "status": "OTP sent",
-            "method": method,
-            "message": "Check your email for the OTP code, then call POST /otp/verify with {\"otp\": \"123456\"}",
-        }), 200
-    except Exception as e:
-        logger.error(f"Failed to send OTP: {e}", exc_info=True)
-        otp_state["error"] = str(e)
-        return jsonify({"error": str(e), "type": type(e).__name__}), 500
+    return jsonify({
+        "status": "OTP sent",
+        "method": method,
+        "message": "Check your email for the OTP code, then call POST /otp/verify with {\"otp\": \"123456\"}",
+    }), 200
 
 
 @app.route('/otp/verify', methods=['POST'])
+@require_key
 def verify_otp():
     """
     Verify the OTP code you received.
 
     Body: {"otp": "123456"}
     """
-    data = request.get_json() or {}
-    otp = data.get("otp", "").strip()
+    data = request.get_json(silent=True) or {}
+    otp = str(data.get("otp", "")).strip()
 
     if not otp:
         return jsonify({"error": "Missing 'otp' in request body"}), 400
@@ -837,6 +870,7 @@ def verify_otp():
         vehicle_manager.verify_otp_and_complete_login(otp)
         logger.info("OTP verification successful.")
 
+        vehicle_state_cache["last_update"] = None
         if not _complete_login(vehicle_manager):
             return jsonify({"error": "OTP verified but no vehicles found on the account"}), 502
 
@@ -1476,6 +1510,11 @@ def _keepalive_loop(interval: int):
         time.sleep(interval)
         try:
             if vehicle_manager is None or vehicle_manager.token is None:
+                continue
+            # Waiting on the owner's code: every refresh here would be another
+            # Kia login answered with another challenge, and one of those
+            # landing between /otp/send and /otp/verify would orphan the code.
+            if otp_state.get("required") and not otp_state.get("verified"):
                 continue
             with _init_lock:
                 alive = vehicle_manager.api.test_token(vehicle_manager.token)

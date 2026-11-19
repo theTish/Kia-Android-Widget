@@ -94,12 +94,20 @@ You can create an iOS Shortcut to interact with your Kia Vehicle Control API eas
 
 ### Authentication (2FA)
 
-Kia Canada requires OTP verification for unrecognised devices. These endpoints
-need no `Authorization` header:
+Kia Canada requires OTP verification for unrecognised devices, and asks again
+every 90 days. The app handles it: when a call comes back "Kia needs a code",
+the app opens a dialog that has Kia email the code and takes it back, and a
+background auto-lock or widget call that hits it raises a notification that
+opens the same dialog.
 
-- `GET /otp/status` - Where the login currently stands
-- `POST /otp/send` - Email an OTP code, e.g. `{"method": "email"}`
-- `POST /otp/verify` - Submit the code, e.g. `{"otp": "123456"}`
+The endpoints behind it, for doing it by hand:
+
+- `GET /otp/status` - Where the login currently stands (no key needed)
+- `POST /otp/send` - Email an OTP code, e.g. `{"method": "email"}` (needs the `Authorization` key)
+- `POST /otp/verify` - Submit the code, e.g. `{"otp": "123456"}` (needs the `Authorization` key)
+
+`/otp/send` always logs in afresh for a new challenge, so it costs one Kia
+login: send once, then verify.
 
 Once verified, Kia remembers the device for 90 days and restarts skip the OTP.
 If a login fails, the API backs off for 35 minutes before trying again —

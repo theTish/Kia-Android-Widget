@@ -205,4 +205,18 @@
     <string name="geofence_summary_off">Off</string>
     <string name="geofence_summary_shadow">Shadow — deciding, not acting</string>
     <string name="geofence_summary_armed">Armed — will lock the car</string>
+
+    <!-- Kia's 90-day device check -->
+    <string name="otp_title">Kia needs a code</string>
+    <string name="otp_body">Every 90 days Kia asks to confirm the server this app talks to. Until then the car won\'t answer, and auto-lock can\'t lock. Tap Email code and Kia will send one to your Kia account email.</string>
+    <string name="otp_body_sent">Code sent. Check your Kia account email and enter it here.</string>
+    <string name="otp_code_hint">Code from the email</string>
+    <string name="otp_send">Email code</string>
+    <string name="otp_verify">Verify</string>
+    <string name="otp_sending">Asking Kia…</string>
+    <string name="otp_verifying">Checking…</string>
+    <string name="otp_trusted">Kia already trusts the server. Nothing to enter.</string>
+    <string name="otp_done">Verified. Good for another 90 days.</string>
+    <string name="otp_channel">Kia sign-in</string>
+    <string name="otp_notification_text">Auto-lock and the widget are paused. Tap to get a code.</string>
 </resources>

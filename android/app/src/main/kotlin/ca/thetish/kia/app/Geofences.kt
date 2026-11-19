@@ -326,7 +326,11 @@ class WatchService : Service() {
             is GeofenceDecision.Lock -> {
                 val armed = mode == GeofenceMode.ARMED
                 val sent = if (armed) {
-                    withContext(Dispatchers.IO) { KiaApi.lock(KiaSettings.load(app)) }.ok
+                    val result = withContext(Dispatchers.IO) { KiaApi.lock(KiaSettings.load(app)) }
+                    // Every lock until the code is entered will fail the same
+                    // way; say so rather than retrying quietly into the log.
+                    KiaOtp.noticeIf(app, result.otpRequired)
+                    result.ok
                 } else {
                     false
                 }
